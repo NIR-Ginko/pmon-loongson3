@@ -57,6 +57,12 @@ NOTE:
 #define DDR_LOOPC	(DDR_REFC*DDR_FREQ*DDR_DIV/SYS_CLOCK)
 #endif
 
+#if (DDR_FREQ == 400)
+#define DDR_FREQ_BAK  500
+#define DDR_DIV_BAK       8
+#define DDR_LOOPC_BAK     (DDR_REFC*DDR_FREQ_BAK*DDR_DIV_BAK/SYS_CLOCK)
+#endif
+
 // L1_* define core frequency
 #define LS_PLL		USE_LS_PLL
 #define ST_PLL		(1 - USE_LS_PLL)
@@ -297,8 +303,17 @@ L1_DIV_2:
 
 	dli	t0, 0x900000001fe001c0
 	or	t0, t0, s1
+#if (DDR_FREQ == 400)
+    dli     a0, (DDR_DIV_BAK << 24) | (DDR_LOOPC_BAK << 14) | (DDR_REFC << 8) | (0x3 << 4) | (0x1 << 3) | PLL_MEM_ENA
+#else
 	dli	a0, (DDR_DIV << 24) | (DDR_LOOPC << 14) | (DDR_REFC << 8) | (0x3 << 4) | (0x1 << 3) | PLL_MEM_ENA
+#endif
 	sw	a0, 0x0(t0)
+
+    lw      t1, 0x0(t0)
+    and     t1, ~(0x1 << 7)  //power on pll
+    sw      t1, 0x0(t0)
+
 21:
 	lw	a0, 0x0(t0)
 	li	a1, 0x00000040

@@ -26,7 +26,19 @@
 
 #define PLL_CFG ((PLL_CG<<25)|(PLL_PD<<24)|(PLL_DIVREF<<17)|(PLL_DIVOUT<<10)|(PLL_LOOP<<1)|(PLL_BYPASS))
 
-#define doub_DLL_DLY 0x2a //8bit
+#if     (DDR_FREQ == 400)
+#define doub_DLL_DLY 0xa2 //8bit
+#elif   (DDR_FREQ == 425)
+#define doub_DLL_DLY 0x9b
+#elif   (DDR_FREQ == 466)
+#define doub_DLL_DLY 0x9b
+#elif   (DDR_FREQ == 500)
+#define doub_DLL_DLY 0x99
+#elif   (DDR_FREQ == 533)
+#define doub_DLL_DLY 0x97
+#elif   (DDR_FREQ == 600)
+#define doub_DLL_DLY 0x94
+#endif
 #define doub_comp    0  //1bit
 #define doub_compbypass 0 //1bit
 #define doub_callown    2 //3bit

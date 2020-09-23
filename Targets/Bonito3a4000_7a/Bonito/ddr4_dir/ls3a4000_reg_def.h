@@ -31,6 +31,8 @@
 #define DDR4_SPD_REFERENCE_RAW_CARDS_OFFSET 0x82
 #define DDR4_2T_OFFSET      0x1448
 
+#define DDR4_DBL_CTRL_CKCA_OFFSET    0x44
+
 #define DDR4_DLL_WRDQ_OFFSET         0x0100
 #define DDR4_DLL_WRDQ1_OFFSET        0x0180
 #define DDR4_DLL_WRDQ2_OFFSET        0x0200
@@ -89,6 +91,10 @@
 #define LVL_RESP_OFFSET        0x0710
 #define DLL_CTRL               0x908
 #define DLL_OUT                0x90c
+
+#define DDR4_PAD_OPDLY_CA      0x80c
+#define DDR4_PAD_OPLEN_CA      0x80d
+#define DDR4_PAD_CTRL_CA       0x808
 
 #define TPHY_RDDATA_OFFSET     0x1062
 #define DDR4_TPHY_WRLAT_OFFSET 0x1065
@@ -178,7 +184,7 @@
 #define DLL_VALUE_OFFSET 0x0036
 
 //DDR REG VALUE DEFINE
-#define SEL_DBL 0x0
+#define SEL_DBL 0x1
 #define PLL_BYPASS 0x0
 #define PLL_LOOP   18  //9bit
 #define PLL_DIVOUT 3   //7bit
@@ -200,6 +206,10 @@
     bal         i2cread;\
     nop;\
     andi        v0, 0xff
+
+#define GET_SPD_CACHE(shift) \
+    dli     v1, (DIMM_INFO_IN_CACHE_OFFS + DIMM_SPD_STORED_OFFS + shift);\
+    lbu     v0, 0x0(v1)
 
 #define GET_SPD_SLOT(shift,slotid)  \
     GET_NODE_ID_a0;\

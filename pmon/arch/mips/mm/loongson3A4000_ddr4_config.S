@@ -44,6 +44,148 @@
     or      s1, s1, v0
 #endif
 
+#if (SEL_DBL== 1)
+#if (DDR_FREQ == 400)
+    move    s6, s1
+//train mc0 clk
+#ifdef  AUTO_DDR_CONFIG
+    move    s3, s1
+    bal     PROBE_CHANNEL_DIMM
+    nop
+#endif
+
+    GET_DIMM_MEMSIZE_V1
+    beqz    a1, 11f
+    nop
+
+    dli     t3, 0x0
+    bal     clk_train
+    nop
+
+    PRINTSTR("\r\nMC0 CLK training done\r\n")
+11:
+
+    GET_DIMM_MEMSIZE_V1
+//save MC0 MEMSIZE
+    dsll    a1, S1_MC0_MEMSIZE_OFFSET_V1
+    dli     t0, 0xf
+    and     t0, s1
+    or      t0, a1
+//train mc1 clk
+    move    s1, s3
+#ifdef  AUTO_DDR_CONFIG
+    dsrl    s1, 24
+    andi    s1, 0xff
+    dsll    s1, 16
+    dli     t1, 0xffff0000
+    not     t1, t1
+    and     s3, t1
+    or      s1, s3
+    move    s3, t0
+    bal     PROBE_CHANNEL_DIMM
+    nop
+#else
+    move    s3, t0
+#endif
+
+    GET_DIMM_MEMSIZE_V1
+    beqz    a1, 11f
+    nop
+
+    dli     t3, 0x1
+    bal     clk_train
+    nop
+
+    PRINTSTR("\r\nMC1 CLK training done\r\n")
+11:
+
+    //reconfig mem clk to 1600
+    dli     a1, 0
+    bal     disable_mc_clk
+    nop
+    dli     a1, 1
+    bal     disable_mc_clk
+    nop
+
+    dli     t0, 0x900000001fe001c0
+    GET_NODE_ID_a1
+    dsll    a1, 44
+    or      t0, t0, a1
+    li      t1, (0x1 << 7)  //power down all pll first
+    sw      t1, 0x0(t0)
+
+    dli     a0, (DDR_DIV << 24) | (DDR_LOOPC << 14) | (DDR_REFC << 8) | (0x3 << 4) | (0x1 << 3) | PLL_MEM_ENA
+    sw      a0, 0x0(t0)
+
+    lw      t1, 0x0(t0)
+    and     t1, ~(0x1 << 7)  //power on pll
+    sw      t1, 0x0(t0)
+
+21:
+    lw      a0, 0x0(t0)
+    li      a1, 0x00000040
+    and     a0, a0, a1
+    beqz    a0, 21b
+    nop
+
+    lw      a0, 0x0(t0)
+    ori     a0, a0, 0x1
+    sw      a0, 0x0(t0)
+
+    dli     a1, 0
+    bal     enable_mc_clk
+    nop
+    dli     a1, 1
+    bal     enable_mc_clk
+    nop
+
+#if 1
+    dli     a1, 0
+    bal     enable_mc_reset
+    nop
+
+    dli     a0, 0x1000
+1:
+    dsubu   a0, a0, 1
+    bnez    a0, 1b
+    nop
+
+    dli     a1, 0
+    bal     disable_mc_reset
+    nop
+
+    dli     a1, 1
+    bal     enable_mc_reset
+    nop
+
+    dli     a0, 0x1000
+1:
+    dsubu   a0, a0, 1
+    bnez    a0, 1b
+    nop
+
+    dli     a1, 1
+    bal     disable_mc_reset
+    nop
+#endif
+
+    move    s1, s6
+    dli     a1, 0
+    bal     enable_mc_regs_default
+    nop
+    dli     a1, 0
+    bal     enable_mc_conf_space
+    nop
+
+    dli     a1, 1
+    bal     enable_mc_regs_default
+    nop
+    dli     a1, 1
+    bal     enable_mc_conf_space
+    nop
+#endif
+#endif
+
 //init mc0
 #ifdef  AUTO_DDR_CONFIG
     move    s3, s1
