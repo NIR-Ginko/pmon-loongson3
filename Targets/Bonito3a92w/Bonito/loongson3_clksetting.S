@@ -44,7 +44,7 @@ ATTENTION:
 #define L1_REFC   1
 #define CPU_PLLIN 100
 
-#elsif REF_33M
+#elif REF_33M
 
 #define L1_DIV      8
 //#define L1_DIV      2

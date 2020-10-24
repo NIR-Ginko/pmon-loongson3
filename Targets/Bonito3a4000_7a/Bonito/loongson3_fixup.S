@@ -32,9 +32,9 @@
 #ifdef BONITO_100M
 #if    (HT0_SOFT_FREQ <= 400)
 #define HT0_PHY_DIV			8
-#elsif (HT0_SOFT_FREQ <= 800)
+#elif (HT0_SOFT_FREQ <= 800)
 #define HT0_PHY_DIV      	4
-#elsif (HT0_SOFT_FREQ <= 1600)
+#elif (HT0_SOFT_FREQ <= 1600)
 #define HT0_PHY_DIV      	2
 #else
 #define HT0_PHY_DIV      	1
@@ -45,7 +45,7 @@
 #elif  BONITO_25M
 #if    (HT0_SOFT_FREQ <= 600)
 #define HT0_PHY_DIV			4
-#elsif (HT0_SOFT_FREQ <= 1200)
+#elif (HT0_SOFT_FREQ <= 1200)
 #define HT0_PHY_DIV			2
 #else
 #define HT0_PHY_DIV			1
