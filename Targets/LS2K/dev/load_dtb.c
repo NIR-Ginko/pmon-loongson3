@@ -292,12 +292,12 @@ static int update_prop_flag(void * ssp, char *propname, int wanted)
 	return 0;
 }
 
+static u8 dtbbuf[DTB_SIZE];
 void verify_dtb(void)
 {
-	char *dtbram;
-	dtbram = (char *)(tgt_flashmap()->fl_map_base);
-	dtbram += DTB_OFFS;
-	working_fdt = (struct fdt_header *)(dtbram + 4);
+	char *dtbram = (char *)(tgt_flashmap()->fl_map_base) + DTB_OFFS;
+	memcpy(dtbbuf, dtbram, DTB_SIZE);
+	working_fdt = (struct fdt_header *)(dtbbuf + 4);
 	if(dtb_cksum(dtbram, DTB_SIZE - 4, 0)) {
 		printf("dtb chsum err! you should load_dtb before boot kernel!!!\n");
 		return;
@@ -318,7 +318,7 @@ void verify_dtb(void)
 		update_pci_bridge(buff + 4);
 		update_mem_args(buff + 4);
 		dtb_cksum(buff, DTB_SIZE - 4, 1);
-		tgt_flashprogram((char *)working_fdt - 4, DTB_SIZE, buff, 0);
+		memcpy(dtbbuf, buff, DTB_SIZE);
 	}
 }
 
@@ -739,7 +739,11 @@ unsigned long long setup_dtb(int ac, char ** av)
 
 int load_dtb(int argc,char **argv)
 {
+	char *dtbram, *working_fdt ;
 	char cmdbuf[100];
+	dtbram = (char *)(tgt_flashmap()->fl_map_base);
+	dtbram += DTB_OFFS;
+	working_fdt = (struct fdt_header *)(dtbram + 4);
 
 	if(argc == 2) {
 		sprintf(cmdbuf,"load -o %p -r %s", heaptop + 4, argv[1]);
@@ -765,12 +769,21 @@ int load_dtb(int argc,char **argv)
 	dtb_cksum(heaptop, DTB_SIZE - 4, 1);
 
 	tgt_flashprogram((char *)working_fdt - 4, DTB_SIZE, heaptop, 0);
+	memcpy(dtbbuf, heaptop, DTB_SIZE);
+	return 0;
+}
+
+int save_dtb(int argc,char **argv)
+{
+	char *dtbram = (char *)(tgt_flashmap()->fl_map_base) + DTB_OFFS;
+	tgt_flashprogram(dtbram, DTB_SIZE, dtbbuf, 0);
 	return 0;
 }
 
 int erase_dtb(int ac, char ** av)
 {
-	if (fl_erase_device((char *)working_fdt - 4, DTB_SIZE, TRUE)) {
+	char *dtbram = (char *)(tgt_flashmap()->fl_map_base) + DTB_OFFS;
+	if (fl_erase_device(dtbram, DTB_SIZE, TRUE)) {
 		printf("Erase failed!\n");
 		return -1;
 	}else
@@ -1094,7 +1107,7 @@ retry:
 	}
 
 	dtb_cksum(buff, DTB_SIZE - 4, 1);
-	tgt_flashprogram((char *)working_fdt - 4, DTB_SIZE, buff, 0);
+	memcpy(dtbbuf, buff, DTB_SIZE);
 	return 0;
 warning:
 	printf("set_dtb <path> <prop> [value]\n");
@@ -1143,7 +1156,7 @@ retry:
 	}
 
 	dtb_cksum(buff, DTB_SIZE - 4, 1);
-	tgt_flashprogram((char *)working_fdt - 4, DTB_SIZE, buff, 0);
+	memcpy(dtbbuf, buff, DTB_SIZE);
 	return 0;
 warning:
 	printf("mk_dtb_node <path> <node>	- Make a new node after <path>\n");
@@ -1197,7 +1210,7 @@ static int rm_dtb_node(int argc,char **argv)
 	}
 
 	dtb_cksum(buff, DTB_SIZE - 4, 1);
-	tgt_flashprogram((char *)working_fdt - 4, DTB_SIZE, buff, 0);
+	memcpy(dtbbuf, buff, DTB_SIZE);
 	return 0;
 warning:
 	printf("rm_dtb_node <path> [prop]	- Remove the node or property\n");
@@ -1248,6 +1261,7 @@ static const Cmd Cmds[] =
 	{"mk_dtb_node","<path> <node>",0,"Create a new node after <path> in dtb", mk_dtb_node,0,99,CMD_REPEAT},
 	{"rm_dtb_node","<path> <node> [prop]",0,"Delete the node or [property] in dtb", rm_dtb_node,0,99,CMD_REPEAT},
 	{"erase_dtb","",0,"erase dtb file in flash", erase_dtb,0,99,CMD_REPEAT},
+	{"save_dtb","",0,"erase dtb file in flash", save_dtb,0,99,CMD_REPEAT},
 	{0, 0}
 };
 static void init_cmd __P((void)) __attribute__ ((constructor));
