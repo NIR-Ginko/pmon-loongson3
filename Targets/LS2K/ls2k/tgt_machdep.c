@@ -1138,6 +1138,7 @@ void tgt_netreset()
  *  environment. See EV64260.h for mapping details. (offset and size).
  */
 
+static char *nvramsecbuf;
 /*
  *  Read in environment from NV-ram and set.
  */
@@ -1154,12 +1155,15 @@ void tgt_mapenv(int (*func) __P((char *, char *)))
 	 */
 	printf("in envinit\n");
 #ifdef NVRAM_IN_FLASH
-	nvram = (char *)(tgt_flashmap())->fl_map_base;
+	nvram = (char *)(tgt_flashmap())->fl_map_base + NVRAM_OFFS;
 	printf("nvram=%08x\n", (unsigned int)nvram);
-	if (fl_devident(nvram, NULL) == 0 ||
-	    cksum(nvram + NVRAM_OFFS, NVRAM_SIZE, 0) != 0) {
+	nvramsecbuf = malloc(NVRAM_SECSIZE);
+	memcpy(nvramsecbuf, nvram - (NVRAM_OFFS & (NVRAM_SECSIZE - 1)), NVRAM_SECSIZE);
+	nvram = nvramsecbuf  + (NVRAM_OFFS & (NVRAM_SECSIZE - 1));
+	if (fl_devident(tgt_flashmap()->fl_map_base, NULL) == 0 ||
+	    cksum(nvram, NVRAM_SIZE, 0) != 0) {
 #else
-	nvram = (char *)malloc(512);
+	nvram = nvramsecbuf = malloc(NVRAM_SIZE);
 	nvram_get(nvram);
 	if (cksum(nvram, NVRAM_SIZE, 0) != 0) {
 #endif
@@ -1167,7 +1171,6 @@ void tgt_mapenv(int (*func) __P((char *, char *)))
 		nvram_invalid = 1;
 	} else {
 #ifdef NVRAM_IN_FLASH
-		nvram += NVRAM_OFFS;
 		ep = nvram + 2;;
 
 		while (*ep != 0) {
@@ -1192,12 +1195,6 @@ void tgt_mapenv(int (*func) __P((char *, char *)))
 
 	printf("NVRAM@%x\n", (u_int32_t) nvram);
 #ifdef NVRAM_IN_FLASH
-	printf("ACTIVECOM_OFFS = %d, = 0x%x\n", ACTIVECOM_OFFS, ACTIVECOM_OFFS);
-	printf("MASTER_BRIDGE_OFFS = %d, = 0x%x\n", MASTER_BRIDGE_OFFS,
-	       MASTER_BRIDGE_OFFS);
-	printf("before :activecom = %d. em_enable = %d\n", activecom,
-	       em_enable);
-//      printf("nuram[MASTER_BRIDGE_OFFS] = %d.\n" nvram[MASTER_BRIDGE_OFFS]);
 	if (!nvram_invalid)
 		bcopy(&nvram[ACTIVECOM_OFFS], &activecom, 1);
 	else
@@ -1224,10 +1221,6 @@ void tgt_mapenv(int (*func) __P((char *, char *)))
 		hwethadr[2], hwethadr[3], hwethadr[4], hwethadr[5]);
 	(*func) ("ethaddr", env);
 
-#ifndef NVRAM_IN_FLASH
-	free(nvram);
-#endif
-
 #ifdef no_thank_you
 	(*func) ("vxWorks", env);
 #endif
@@ -1245,15 +1238,12 @@ void tgt_mapenv(int (*func) __P((char *, char *)))
 	(*func) ("busclock", env);
 
 	(*func) ("systype", SYSTYPE);
-
 }
 
 int tgt_unsetenv(char *name)
 {
 	char *ep, *np, *sp;
-	char *nvram;
 	char *nvrambuf;
-	char *nvramsecbuf;
 	int status;
 
 	if (nvram_invalid) {
@@ -1262,20 +1252,10 @@ int tgt_unsetenv(char *name)
 
 	/* Use first defined flash device (we probably have only one) */
 #ifdef NVRAM_IN_FLASH
-	nvram = (char *)(tgt_flashmap())->fl_map_base;
-
-	/* Map. Deal with an entire sector even if we only use part of it */
-	nvram += NVRAM_OFFS & ~(NVRAM_SECSIZE - 1);
-	nvramsecbuf = (char *)malloc(NVRAM_SECSIZE);
-	if (nvramsecbuf == 0) {
-		printf("Warning! Unable to malloc nvrambuffer!\n");
-		return (-1);
-	}
-	memcpy(nvramsecbuf, nvram, NVRAM_SECSIZE);
 	nvrambuf = nvramsecbuf + (NVRAM_OFFS & (NVRAM_SECSIZE - 1));
 #else
-	nvramsecbuf = nvrambuf = nvram = (char *)malloc(512);
-	nvram_get(nvram);
+	nvrambuf = (char *)nvramsecbuf;
+	nvram_get(nvrambuf);
 #endif
 
 	ep = nvrambuf + 2;
@@ -1299,31 +1279,6 @@ int tgt_unsetenv(char *name)
 				nvrambuf[3] = '\0';
 			}
 			cksum(nvrambuf, NVRAM_SIZE, 1);
-#ifdef NVRAM_IN_FLASH
-
-#ifdef BOOT_FROM_NAND
-			memcpy(nvram, nvramsecbuf, NVRAM_SECSIZE);
-			//update_env_to_nand( nvram, nvramsecbuf,NVRAM_SECSIZE);
-			update_rom_to_nand_1block(nvram,
-						  (char *)(tgt_flashmap())->
-						  fl_map_base);
-
-#else
-			if (fl_erase_device(nvram, NVRAM_SECSIZE, FALSE)) {
-				status = -1;
-				break;
-			}
-
-			if (fl_program_device
-			    (nvram, nvramsecbuf, NVRAM_SECSIZE, FALSE)) {
-				status = -1;
-				break;
-			}
-#endif
-
-#else
-			nvram_put(nvram);
-#endif
 			status = 1;
 			break;
 		} else if (*ep != '\0') {
@@ -1331,7 +1286,6 @@ int tgt_unsetenv(char *name)
 		}
 	}
 #endif
-	free(nvramsecbuf);
 	return (status);
 }
 
@@ -1490,10 +1444,6 @@ int tgt_setenv(char *name, char *value)
 	char *ep;
 	int envlen;
 	char *nvrambuf;
-	char *nvramsecbuf;
-#ifdef NVRAM_IN_FLASH
-	char *nvram;
-#endif
 
 	/* Non permanent vars. */
 	if (strcmp(EXPERT, name) == 0) {
@@ -1513,82 +1463,31 @@ int tgt_setenv(char *name, char *value)
 		return (0);	/* Are you crazy!? */
 	}
 
-	/* Use first defined flash device (we probably have only one) */
 #ifdef NVRAM_IN_FLASH
-	nvram = (char *)(tgt_flashmap())->fl_map_base;
-
-	/* Deal with an entire sector even if we only use part of it */
-	nvram += NVRAM_OFFS & ~(NVRAM_SECSIZE - 1);
+		nvrambuf = nvramsecbuf + (NVRAM_OFFS & (NVRAM_SECSIZE - 1));
+#else
+		nvrambuf = nvramsecbuf;
 #endif
-
+	/* Use first defined flash device (we probably have only one) */
 	/* If NVRAM is found to be uninitialized, reinit it. */
 	if (nvram_invalid) {
-		nvramsecbuf = (char *)malloc(NVRAM_SECSIZE);
-		if (nvramsecbuf == 0) {
-			printf("Warning! Unable to malloc nvrambuffer!\n");
-			return (-1);
-		}
-#ifdef NVRAM_IN_FLASH
-		memcpy(nvramsecbuf, nvram, NVRAM_SECSIZE);
-#endif
-		nvrambuf = nvramsecbuf + (NVRAM_OFFS & (NVRAM_SECSIZE - 1));
 		memset(nvrambuf, -1, NVRAM_SIZE);
 		nvrambuf[2] = '\0';
 		nvrambuf[3] = '\0';
 		cksum((void *)nvrambuf, NVRAM_SIZE, 1);
 		printf("Warning! NVRAM checksum fail. Reset!\n");
-#ifdef NVRAM_IN_FLASH
-
-#ifdef BOOT_FROM_NAND
-		memcpy(nvram, nvramsecbuf, NVRAM_SECSIZE);
-		//update_env_to_nand( nvram, nvramsecbuf,NVRAM_SECSIZE);
-		update_rom_to_nand_1block(nvram,
-					  (char *)(tgt_flashmap())->
-					  fl_map_base);
-#else
-
-		if (fl_erase_device(nvram, NVRAM_SECSIZE, FALSE)) {
-			printf("Error! Nvram erase failed!\n");
-			free(nvramsecbuf);
-			return (-1);
-		}
-		if (fl_program_device(nvram, nvramsecbuf, NVRAM_SECSIZE, FALSE)) {
-			printf("Error! Nvram init failed!\n");
-			free(nvramsecbuf);
-			return (-1);
-		}
-#endif
-
-#else
-		nvram_put(nvramsecbuf);
-#endif
 		nvram_invalid = 0;
-		free(nvramsecbuf);
 	}
 
 	/* Remove any current setting */
 	tgt_unsetenv(name);
 
-	/* Find end of evironment strings */
-	nvramsecbuf = (char *)malloc(NVRAM_SECSIZE);
-	if (nvramsecbuf == 0) {
-		printf("Warning! Unable to malloc nvrambuffer!\n");
-		return (-1);
-	}
-#ifndef NVRAM_IN_FLASH
-	nvram_get(nvramsecbuf);
-#else
-	memcpy(nvramsecbuf, nvram, NVRAM_SECSIZE);
-#endif
-	nvrambuf = nvramsecbuf + (NVRAM_OFFS & (NVRAM_SECSIZE - 1));
 	/* Etheraddr is special case to save space */
 #if 1				/*added by tangyt */
 	if (strcmp("activecom", name) == 0) {
 		activecom = strtoul(value, 0, 0);
-		printf("set activecom to com %d\n", activecom);
 	} else if (strcmp("em_enable", name) == 0) {
 		em_enable = strtoul(value, 0, 0);
-		printf("set em_enable to com %d\n", em_enable);
 	} else
 #endif
 	if (strcmp("ethaddr", name) == 0) {
@@ -1651,32 +1550,32 @@ int tgt_setenv(char *name, char *value)
 	bcopy(&em_enable, &nvrambuf[MASTER_BRIDGE_OFFS], 1);
 #endif
 	bcopy(hwethadr, &nvramsecbuf[ETHER_OFFS], 6);
-#ifdef NVRAM_IN_FLASH
-
-#ifdef BOOT_FROM_NAND
-
-	memcpy(nvram, nvramsecbuf, NVRAM_SECSIZE);
-	//update_env_to_nand( nvram, nvramsecbuf,NVRAM_SECSIZE);
-	update_rom_to_nand_1block(nvram, (char *)(tgt_flashmap())->fl_map_base);
-#else
-
-	if (fl_erase_device(nvram, NVRAM_SECSIZE, FALSE)) {
-		printf("Error! Nvram erase failed!\n");
-		free(nvramsecbuf);
-		return (0);
-	}
-	if (fl_program_device(nvram, nvramsecbuf, NVRAM_SECSIZE, FALSE)) {
-		printf("Error! Nvram program failed!\n");
-		free(nvramsecbuf);
-		return (0);
-	}
-#endif
-
-#else
-	nvram_put(nvramsecbuf);
-#endif
-	free(nvramsecbuf);
 	return (1);
+}
+
+int cmd_saveenv(int argc, char *argv)
+{
+#ifdef NVRAM_IN_FLASH
+	char *nvram = (char *)(tgt_flashmap())->fl_map_base + (NVRAM_OFFS & ~(NVRAM_SECSIZE - 1));
+#ifdef BOOT_FROM_NAND
+			update_rom_to_nand_1block(nvramsecbuf,
+						  (char *)(tgt_flashmap())->
+						  fl_map_base);
+#else
+			if (fl_erase_device(nvram, NVRAM_SECSIZE, FALSE)) {
+				return -1;
+			}
+
+			if (fl_program_device
+			    (nvram, nvramsecbuf, NVRAM_SECSIZE, FALSE)) {
+				return -1;
+			}
+#endif
+
+#else
+			nvram_put(nvramsecbuf);
+#endif
+	return 0;
 }
 
 /*
@@ -2228,4 +2127,19 @@ struct efi_memory_map_loongson * init_memory_map()
 	emap->map[6].mem_size = VRAM_SIZE;
 #endif
 	return emap;
+}
+
+static const Cmd Cmds[] =
+{
+	{"MyCmds"},
+	{"saveenv",	"", 0, "save env to rom", cmd_saveenv, 0, 99, CMD_REPEAT},
+	{0, 0}
+};
+
+static void init_cmd __P((void)) __attribute__ ((constructor));
+
+static void
+init_cmd()
+{
+	cmdlist_expand(Cmds, 1);
 }
