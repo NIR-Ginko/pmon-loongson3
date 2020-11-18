@@ -199,7 +199,7 @@
 #define SET_HARD_FREQ(node, ht, freq) \
 	li	t0, freq; \
 	dli	t2, 0x900000fdfb000000 | node << 44 | ht << 40; \
-	sb	t0, 0x49(t2);
+	sb	t0, (LS3A_HT_FREQ+1)(t2);
 
 #define SET_GEN3_MODE(node, ht) \
 	dli	t2, 0x900000fdfb000000 | node << 44 | ht << 40; \
