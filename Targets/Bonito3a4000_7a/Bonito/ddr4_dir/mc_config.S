@@ -14,6 +14,19 @@
 #define RTT_34      0x7
 #define RTT_DISABLE 0x0
 
+#define PAD_ODTDQ 0x3
+
+#define NODE0_MC0_CLK   0x44
+#define NODE0_MC1_CLK   0x44
+#define NODE1_MC0_CLK   0x44
+#define NODE1_MC1_CLK   0x44
+#define NODE2_MC0_CLK   0x44
+#define NODE2_MC1_CLK   0x44
+#define NODE3_MC0_CLK   0x44
+#define NODE3_MC1_CLK   0x44
+
+#define RDIMM_CMD_LATENCY_ADD 1
+
 #define IDLE_TIMES  0x10
 //#define PARAM_SET_FROM_SPD_DEBUG
 #define SET_BY_PROTOCOL
@@ -21,6 +34,7 @@
 #ifdef AUTO_DDR_CONFIG
 //#define SPD_ONLY
 #endif
+//#define  PL_ENABLE
 
 //#define PRINTSTR(x) \
 //    .rdata;98: .asciz x; .text; la a0, 98b; bal outputstring; nop
@@ -35,8 +49,8 @@
 
 mc_config:
     move    t7, ra
-    move    k1, a2
-mc_reset:
+    dli     k1, 0
+
     daddu   a2, a2, s0
     nop
     dli     t1, 744
@@ -50,36 +64,135 @@ mc_reset:
     daddiu  v0, v0, 0x8
     bnez    t1, 1b
     nop
+
 #if (SEL_DBL == 1)
-#ifdef  MULTI_CHIP
-#define NODE0_MC0_DBL   0x2c00000030
-#define NODE0_MC1_DBL   0x2800000030
-#define NODE1_MC0_DBL   0x000000002e
-#define NODE1_MC1_DBL   0x0000000030
-#define NODE2_MC0_DBL   0x0000000030
-#define NODE2_MC1_DBL   0x0000000031
-#define NODE3_MC0_DBL   0x0000000030
-#define NODE3_MC1_DBL   0x0000000032
-#define NODE0_MC0_CLK   0x144
-#define NODE0_MC1_CLK   0x144
-#define NODE1_MC0_CLK   0x144
-#define NODE1_MC1_CLK   0x144
-#define NODE2_MC0_CLK   0x144
-#define NODE2_MC1_CLK   0x144
-#define NODE3_MC0_CLK   0x144
-#define NODE3_MC1_CLK   0x144
+    GET_DIMM_TYPE_V1
+    andi    a1, a1, 1
+    beqz    a1, 1f
+    nop
+#ifdef AUTO_DDR_CONFIG
+    GET_SPD(0x89)
+    dli     t1, (DIMM_INFO_IN_CACHE_OFFS + DIMM_SPD_STORED_OFFS)
+    sb      v0, 0x89(t1)
+    GET_SPD(0x8a)
+    sb      v0, 0x8a(t1)
+#endif
+1:
+#if (DDR_FREQ != 400)
+    /* set init s5 value for dbl_clk_training */
+    dli     s5, 0
+#endif
+#endif
+
+    /* check whether to train */
+    dli     t5, DIMM_INFO_IN_CACHE_OFFS
+    sb      zero, DDR_TRAIN_FLAG_OFFS(t5)
+    /* read SPD info */
+    SPD_REGS_INFO(t2,0);
+    SPD_REGS_INFO(t4,1);
+    /* t1:save flash base */
+    GET_NODE_ID_a1
+    mul     a1, DIMM_INFO_SIZE
+    dli     t1, (0xffffffff00000000 | DIMM_INFO_IN_FLASH_OFFS)
+    daddu   t1, a1
+    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
+    daddu   t1, a0
+
+    /*check DDR freq */
+    li      a1, DDR_FREQ
+    lw      a0, DIMM_OFFS_CLK(t1)
+    beq     a1, a0, 2f
+    nop
+#if (SEL_DBL == 1)
+#if (DDR_FREQ != 400)
+    /* training dbl clk */
+    or      s5, 1<<32
+    PRINTSTR("\r\nStart training CLK")
+
+    /* set init cache value for dbl_clk_training */
+    dli     t0, 0
+1:
+    /* get t0 dcc couple base address in a0 */
+    dsll    a0, t0, 3
+    daddu   a0, (DIMM_INFO_IN_CACHE_OFFS + DBL_DCC_TRAIN_OFFS)
+    /* config dcc couples */
+    dli     v0, 63
+    dsubu   a1, v0, t0
+    and     v1, a1, 7
+    dsrl    a1, 3
+    and     v0, a1, 7
+    dsll    v0, 4
+    or      v1, v0
+    sw      v1, DBL_DCC_TRAIN_STORED_DCC_OFFSET(a0)
+    dli     v0, 1
+    sh      v0, DBL_DCC_TRAIN_STORED_DS_SUM_OFFSET(a0)
+    dli     v0, 0xffff
+    sh      v0, DBL_DCC_TRAIN_STORED_PERIOD_SUB_OFFSET(a0)
+    daddu   t0, 1
+    bltu    t0, DBL_DCC_TRAIN_STORED_NUM, 1b
+    nop
+#endif
+#endif
+    b       3f
+    nop
+2:
+#ifdef  AUTO_DDR_CONFIG
+    /*mc0:k0=0; mc1:k0=1*/
+    /* check slot0 SPD info */
+    ld      a0, DIMM_OFFS_SLOT0_SPD(t1)
+    bne     t2, a0, 3f
+    nop
+    /* check slot1 SPD info */
+    ld      a0, DIMM_OFFS_SLOT1_SPD(t1)
+    bne     t4, a0, 3f
+    nop
+    b       4f
+    nop
+#endif
+3:
+    dli     v0, 1
+    sb      v0, DDR_TRAIN_FLAG_OFFS(t5)
+    sd      t2, SLOT0_SPD_OFFS(t5)
+    sd      t4, (SLOT0_SPD_OFFS + 8)(t5)
+4:
+
+mc_reset:
+    beqz    k1, 2f
+    nop
+//write param registers from cache
+    dli     a2, (DIMM_INFO_IN_CACHE_OFFS + MC_PARAM_IN_CACHE_OFFS)
+    dli     t1, 744
+    daddiu  v0, t8, 0x0
+1:
+    ld      a1, 0x0(a2)
+    sd      a1, 0x0(v0)
+    daddiu  t1, t1, -1
+    daddiu  a2, a2, 0x8
+    daddiu  v0, v0, 0x8
+    bnez    t1, 1b
+    nop
+
+    b       ddr_init
+    nop
+2:
+
+#if (SEL_DBL == 1)
+#if (DDR_FREQ == 533)
+    dli     v0, 0x97
+#else
+    dli     v0, 0xa2
+#endif
+    sb      v0, DBL_CFG(t8)
 
     GET_NODE_ID_a1
     bnez    a1, 2f
     nop
     bnez    k0, 1f
     nop
-    dli     t1, NODE0_MC0_DBL
     dli     t0, NODE0_MC0_CLK
     b       10f
     nop
 1:
-    dli     t1, NODE0_MC1_DBL
     dli     t0, NODE0_MC1_CLK
     b       10f
     nop
@@ -88,12 +201,10 @@ mc_reset:
     nop
     bnez    k0, 1f
     nop
-    dli     t1, NODE1_MC0_DBL
     dli     t0, NODE1_MC0_CLK
     b       10f
     nop
 1:
-    dli     t1, NODE1_MC1_DBL
     dli     t0, NODE1_MC1_CLK
     b       10f
     nop
@@ -102,29 +213,23 @@ mc_reset:
     nop
     bnez    k0, 1f
     nop
-    dli     t1, NODE2_MC0_DBL
     dli     t0, NODE2_MC0_CLK
     b       10f
     nop
 1:
-    dli     t1, NODE2_MC1_DBL
     dli     t0, NODE2_MC1_CLK
     b       10f
     nop
 2:
     bnez    k0, 1f
     nop
-    dli     t1, NODE3_MC0_DBL
     dli     t0, NODE3_MC0_CLK
     b       10f
     nop
 1:
-    dli     t1, NODE3_MC1_DBL
     dli     t0, NODE3_MC1_CLK
 10:
-    sd      t1, DBL_CFG(t8)
     sb      t0, CLK_PHASE(t8)
-#endif
 #endif
 
 
@@ -149,6 +254,10 @@ mc_reset:
 
 #endif
 
+#ifdef  BL4
+    dli     t0, 3
+    sb      t0, 0x1440(t8)
+#endif
 #ifdef  TWO_T_MODE_ENABLE
     dli     t0, 1
     sb      t0, DDR4_2T_OFFSET(t8)
@@ -327,7 +436,7 @@ mc_reset:
     or      t0, t1
     sd      t0, 0x1200(t8)
 
-//if x4
+//x4 setting
     GET_SDRAM_WIDTH_V1
     bnez    a1, 1f
     nop
@@ -340,7 +449,16 @@ mc_reset:
     dsll    t1, 40
     or      t0, t1
     sd      t0, 0x8(t8)
+1:
 //disable DM in MRS
+#ifdef  DISABLE_DM
+    b       1f
+    nop
+#endif
+    GET_SDRAM_WIDTH_V1
+    bnez    a1, 2f
+    nop
+1:
     lhu     t0, 0x118a(t8)
     dli     t1, 0x1
     dsll    t1, 10
@@ -363,7 +481,7 @@ mc_reset:
     dsll    t1, 40
     or      t0, t1
     sd      t0, 0x1280(t8)
-1:
+2:
 //change according to Burst length
     ld      t0, 0x1280(t8)
     dli     t1, 0xff
@@ -526,7 +644,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR1_CS0_REG(t8)
     and     a1, a1, a0
+#ifdef MULTI_CHIP
     li      a0, RTT_DISABLE
+#else
+    li      a0, RTT_240
+#endif
     dsll    a0, a0, 8
     or      a1, a1, a0
     sh      a1, DDR4_MR1_CS0_REG(t8)
@@ -536,7 +658,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR1_CS1_REG(t8)
     and     a1, a1, a0
+#ifdef MULTI_CHIP
     li      a0, RTT_DISABLE
+#else
+    li      a0, RTT_240
+#endif
     dsll    a0, a0, 8
     or      a1, a1, a0
     sh      a1, DDR4_MR1_CS1_REG(t8)
@@ -546,7 +672,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR5_CS0_REG(t8)
     and     a1, a1, a0
+#ifdef MULTI_CHIP
     li      a0, RTT_60
+#else
+    li      a0, RTT_48
+#endif
     dsll    a0, a0, 6
     or      a1, a1, a0
     sh      a1, DDR4_MR5_CS0_REG(t8)
@@ -556,10 +686,44 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR5_CS1_REG(t8)
     and     a1, a1, a0
+#ifdef MULTI_CHIP
     li      a0, RTT_60
+#else
+    li      a0, RTT_48
+#endif
     dsll    a0, a0, 6
     or      a1, a1, a0
     sh      a1, DDR4_MR5_CS1_REG(t8)
+
+//reconfig PAD_DS_ODT_DQ for 2rank UDIMM
+#ifndef MULTI_CHIP
+    li      a0, 0x7
+    dsll    a0, a0, 15
+    not     a0, a0
+    lw      a1, 0x804(t8)
+    and     a1, a1, a0
+    li      a0, PAD_ODTDQ
+    dsll    a0, a0, 15
+    or      a1, a1, a0
+    sw      a1, 0x804(t8)
+
+    move    t0, t8
+    li      t1, 9
+1:
+    li      a0, 0x7
+    dsll    a0, a0, 9
+    not     a0, a0
+    lh      a1, 0x840(t0)
+    and     a1, a1, a0
+    li      a0, PAD_ODTDQ
+    dsll    a0, a0, 9
+    or      a1, a1, a0
+    sh      a1, 0x840(t0)
+    daddiu  t0, t0, 0x2
+    subu    t1, 0x1
+    bnez    t1, 1b
+    nop
+#endif
 
     b       9f
     nop
@@ -577,7 +741,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR1_CS0_REG(t8)
     and     a1, a1, a0
-    li      a0, 0x2
+#ifdef MULTI_CHIP
+    li      a0, RTT_DISABLE
+#else
+    li      a0, RTT_240
+#endif
     dsll    a0, a0, 8
     or      a1, a1, a0
     sh      a1, DDR4_MR1_CS0_REG(t8)
@@ -587,7 +755,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR1_CS1_REG(t8)
     and     a1, a1, a0
-    li      a0, 0x2
+#ifdef MULTI_CHIP
+    li      a0, RTT_DISABLE
+#else
+    li      a0, RTT_240
+#endif
     dsll    a0, a0, 8
     or      a1, a1, a0
     sh      a1, DDR4_MR1_CS1_REG(t8)
@@ -597,7 +769,11 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR5_CS0_REG(t8)
     and     a1, a1, a0
-    li      a0, 0x6
+#ifdef MULTI_CHIP
+    li      a0, RTT_60
+#else
+    li      a0, RTT_48
+#endif
     dsll    a0, a0, 6
     or      a1, a1, a0
     sh      a1, DDR4_MR5_CS0_REG(t8)
@@ -607,10 +783,44 @@ mc_reset:
     not     a0, a0
     lh      a1, DDR4_MR5_CS1_REG(t8)
     and     a1, a1, a0
-    li      a0, 0x6
+#ifdef MULTI_CHIP
+    li      a0, RTT_60
+#else
+    li      a0, RTT_48
+#endif
     dsll    a0, a0, 6
     or      a1, a1, a0
     sh      a1, DDR4_MR5_CS1_REG(t8)
+
+//reconfig PAD_DS_ODT_DQ for 2rank UDIMM
+#ifndef MULTI_CHIP
+    li      a0, 0x7
+    dsll    a0, a0, 15
+    not     a0, a0
+    lw      a1, 0x804(t8)
+    and     a1, a1, a0
+    li      a0, PAD_ODTDQ
+    dsll    a0, a0, 15
+    or      a1, a1, a0
+    sw      a1, 0x804(t8)
+
+    move    t0, t8
+    li      t1, 9
+1:
+    li      a0, 0x7
+    dsll    a0, a0, 9
+    not     a0, a0
+    lh      a1, 0x840(t0)
+    and     a1, a1, a0
+    li      a0, PAD_ODTDQ
+    dsll    a0, a0, 9
+    or      a1, a1, a0
+    sh      a1, 0x840(t0)
+    daddiu  t0, t0, 0x2
+    subu    t1, 0x1
+    bnez    t1, 1b
+    nop
+#endif
 
     b       9f
     nop
@@ -793,6 +1003,18 @@ set_tPL:
 	nop
 3:	dli			t1, 5
 4:
+    dsubu       t2, t1, 3
+    move        a1, t8
+1:
+    lh          a0, DDR4_MR5_CS0_REG(a1)
+    and         a0, ~0x7
+    or          a0, t2
+    sh          a0, DDR4_MR5_CS0_REG(a1)
+    daddu       a1, 0x10
+    and         a2, a1, 0xff
+    bleu        a2, 0x70, 1b
+    nop
+
 #else
     dli         t1, 0
 #endif
@@ -967,16 +1189,6 @@ ifdef AL2:AL=CL-2
 2:
 #endif
 #endif
-#ifdef PL_ENABLE
-	lb			t4, 0x1068(t8)		#t4 means PL
-#else
-	dli			t4, 0
-#endif
-	dli			t2, 0			#AL=0, t2 means AL, default disable
-#ifdef	DLL_off
-	dli			t1, 10
-	dli			t4, 0
-#endif
 #ifdef AL_ENABLE
 #if	(AL==1)
 	dsubu		t2, t1, 1
@@ -984,10 +1196,7 @@ ifdef AL2:AL=CL-2
 	dsubu		t2, t1, 2
 #endif
 #endif
-#ifdef	DLL_off
-	dsubu		t1, t1, 1
-#endif
-5:	daddu		t1, t1, t4
+5:
 	daddu		t1, t1, t2
 	sb			t1, 0x1060(t8)
 //set RL in MRS
@@ -1120,7 +1329,7 @@ ifdef AL2:AL=CL-2
 
 #ifdef SET_BY_PROTOCOL
 set_tRESET:
-	dli		t1, 200000000
+	dli		t1, 300000000
 	dsll		t0, t0, 12
 
     move        a1, t1
@@ -1493,32 +1702,10 @@ set_tWL:						#use set1
 	nop
 #endif
 
-
-/************************
-if ODT on:
-	tWLDQSEN>tMOD+ODTLon+tADC	(DLL Enable)
-	tWLDQSEN>tMOD+tAONAS		(DLL Disable)
-
-tMOD=max(24nCK,15ns)
-tAONAS (1ns,9ns)
-tADC (0.3tCK,0.7tCK)
-ODTLon:
-if preamble==1	ODTLon=WL-2
-if preamble==2	ODTLon=WL-3
-************************/
-
 #ifdef SET_BY_PROTOCOL
 set_tWLDQSEN:
-#ifndef DDR3_DIMM
-    lb      t1, 0x1004(t8)  //tMOD
-    lb      t2, 0x1064(t8)
-    sub     t2, t2, 2   //tDODTLon=WL-2
-    add     t1, t2
-    add     t1, 1
-#else
-    li      t1, 25
-#endif
-	sb		t1, 0x1005(t8)	#tWLDQSEN varies depending on DLL Mode or ODT
+    dli     t1, 40      //tWLMRD
+    sb		t1, 0x1005(t8)
 
 #ifdef  PARAM_SET_FROM_SPD_DEBUG
 	PRINTSTR("\r\n tWLDQSEN	=	")
@@ -3372,30 +3559,8 @@ set_tPHY_RDLAT:
 	nop
 #endif
 
-#if 0
-set_tPHY_WRLAT:
-    lbu         t1, 0x1448(t8)
-	lb			t2, 0x1064(t8)
-    dsubu       t2, t2, 9
-    daddu       t1, t1, t2
-    daddu       t1, t1, 5
-    GET_DIMM_TYPE_V1
-    beqz        a1, 1f
-    nop
-    daddu       t1, 1
-1:
-    sb          t1, 0x1065(t8)
-#ifdef  PARAM_SET_FROM_SPD_DEBUG
-	PRINTSTR("\r\n tPHY_WRLAT	=	")
-	move		a0, t1
-	bal			hexserial
-	nop
-#endif
-#endif
-
-#if 0
 set_tCAL:					#tCAL=max(3nCK,3.748ns)
-#ifdef  CAL_ENABLE
+#ifndef  DISABLE_CAL
 	dli			t1, 3748
 	dli			t4, 3
 	dmulou		t2, t0, t4
@@ -3411,22 +3576,115 @@ set_tCAL:					#tCAL=max(3nCK,3.748ns)
 	nop
     move        t1, v0
 2:
+//set ca delay
+    bne         t1, 2, 1f
+    nop
+    dli         v0, 2
+#ifdef  TWO_T_MODE_ENABLE
+    dli         v1, 3
+#else
+    dli         v1, 2
+#endif
+    b           2f
+    nop
+1:
+    bne         t1, 3, 1f
+    nop
+    dli         v0, 2
+    dli         v1, 3
+    b           2f
+    nop
+1:
+    bne         t1, 4, 1f
+    nop
+    dli         v0, 3
+#ifdef  TWO_T_MODE_ENABLE
+    dli         v1, 3
+#else
+    dli         v1, 2
+#endif
+    b           2f
+    nop
+1:
+    bne         t1, 5, 1f
+    nop
+    dli         v0, 3
+    dli         v1, 3
+    b           2f
+    nop
+1:
+    bne         t1, 6, 1f
+    nop
+    dli         v0, 4
+#ifdef  TWO_T_MODE_ENABLE
+    dli         v1, 3
+#else
+    dli         v1, 2
+#endif
+    b           2f
+    nop
+1:
+    bne         t1, 7, 1f
+    nop
+    dli         v0, 4
+    dli         v1, 3
+    b           2f
+    nop
+1:
+    //CAL = 8
+    dli         v0, 5
+#ifdef  TWO_T_MODE_ENABLE
+    dli         v1, 3
+#else
+    dli         v1, 2
+#endif
+2:
+    sb          v0, DDR4_PAD_OPDLY_CA(t8)
+    sb          v1, DDR4_PAD_OPLEN_CA(t8)
 #else
     dli         t1, 0
 #endif
+#ifndef  DISABLE_CAL
+//set in MR4
+    move        v0, t1
+    bltu        v0, 8, 1f
+    nop
+    dsubu       v0, 1
+1:
+    dsubu       v0, 2
+    dsll        v0, 6
+    dli         t3, 0
+1:
+    dsll        t3, 4
+    daddu       t2, t3, t8
+    lh          v1, DDR4_MR4_CS0_REG(t2)
+    and         v1, ~(0x7 << 6)
+    or          v1, v0
+    sh          v1, DDR4_MR4_CS0_REG(t2)
+    daddu       t3, 1
+    bltu        t3, 8, 1b
+    nop
+//RDIMM
+    GET_DIMM_TYPE_V1
+    andi        a1, a1, 1
+    beqz        a1, 1f
+    nop
+    dsubu       t1, RDIMM_CMD_LATENCY_ADD
+1:
+#endif
 	sb			t1, 0x106c(t8)
+
 #ifdef  PARAM_SET_FROM_SPD_DEBUG
 	PRINTSTR("\r\n tCAL		=	")
 	move			a0, t1
 	bal			hexserial
 	nop
 #endif
-#endif
 
 #ifdef DEBUG_DDR_PARAM
-    move    s7, t8
-    move    t4, ra
-
+/****************
+reg usded : s7, t6, t7, t1, v0, v1, a0, a1, a2, a3
+****************/
     bal     tgt_testchar
     nop
     beqz    v0, 3f
@@ -3439,16 +3697,16 @@ set_tCAL:					#tCAL=max(3nCK,3.748ns)
     beq     v0, a1, 3f
     nop
     and     v0, v0, 0xfff8
-    daddu   s6, v0, s7
+    daddu   t1, v0, t8
 
     PRINTSTR("\r\nInput data: ")
     bal     inputaddress
     nop
-    sd      v0, 0x0(s6)
+    sd      v0, 0x0(t1)
 
     PRINTSTR("\r\nThe parameter just write is: ")
-    ld      t6, 0x0(s6)
-    move    a0, s6
+    ld      t6, 0x0(t1)
+    move    a0, t1
     and     a0, a0, 0xffff
     bal     hexserial
     nop
@@ -3465,22 +3723,94 @@ set_tCAL:					#tCAL=max(3nCK,3.748ns)
     nop
 
 3:
-    dsrl    a0, s7, 32
-    bal     hexserial
-    nop
-    //PRINTSTR("  ")
-    move    a0, s7
-    bal     hexserial
-    nop
-    PRINTSTR("\r\n")
-
-    move    a0, s7
-    move    ra, t4
-
 #endif
 
 ##START
 ddr_init:
+    bnez    k1, 3f
+    nop
+#if (SEL_DBL == 1)
+    dsrl    v0, s5, 32
+    and     v0, 1
+    beqz    v0, 3f
+    nop
+#endif
+//store param registers to cache
+    dli     v0, (DIMM_INFO_IN_CACHE_OFFS + MC_PARAM_IN_CACHE_OFFS)
+    dli     t1, 744
+    daddiu  a2, t8, 0x0
+1:
+    ld      a1, 0x0(a2)
+    sd      a1, 0x0(v0)
+    daddiu  t1, t1, -1
+    daddiu  a2, a2, 0x8
+    daddiu  v0, v0, 0x8
+    bnez    t1, 1b
+    nop
+    dli     k1, 1
+3:
+
+#if (SEL_DBL == 1)
+#if (DDR_FREQ != 400)
+    dsrl    v0, s5, 32
+    and     v0, 1
+    beqz    v0, 1f
+    nop
+    /* set dcc couple for dbl_clk_training */
+    lb      t4, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+    and     t4, ~(0x3f<<2)
+    GET_DBL_DCC_TRAIN_CURRENT_DCC_VALUE
+    and     v1, v0, 0x70
+    dsrl    v1, 1
+    and     v0, 0x7
+    or      v0, v1
+    dsll    v0, 2
+    or      t4, v0
+    sb      t4, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+    b       2f
+    nop
+1:
+    /* load dcc value from flash */
+    /* t1:save flash base */
+    GET_NODE_ID_a1
+    mul     a1, DIMM_INFO_SIZE
+    dli     t1, (0xffffffff00000000 | DIMM_INFO_IN_FLASH_OFFS)
+    daddu   t1, a1
+    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
+    daddu   t1, a0
+    lb      t0, DIMM_OFFS_DBL_CFG(t1)
+    and     v0, t0, 7<<4
+    dsrl    v0, 1
+    and     v1, t0, 7
+    or      v0, v1
+    dsll    v0, 2
+    lb      v1, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+    and     v1, 3
+    or      v0, v1
+    sb      v0, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+2:
+#else
+    /* load dcc value from cache */
+    /* t3:save cache base */
+    GET_NODE_ID_a1
+    mul     a1, DIMM_INFO_SIZE
+    dli     t3, DIMM_INFO_IN_CACHE_OFFS
+    daddu   t3, a1
+    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
+    daddu   t3, a0
+    lb      t0, DIMM_OFFS_DBL_CFG(t3)
+    and     v0, t0, 7<<4
+    dsrl    v0, 1
+    and     v1, t0, 7
+    or      v0, v1
+    dsll    v0, 2
+    lb      v1, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+    and     v1, 3
+    or      v0, v1
+    sb      v0, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+#endif
+#endif
+
 #ifdef VDDP_CTR
 //change vddp to 1.1v
     PRINTSTR("\r\nchanging vddp to ")
@@ -3611,8 +3941,6 @@ ddr_init:
     ld      t3, (PHY_ADDRESS + 0x010)(t8)
     ori     t3, (0x1 << 1)     //phy_init_start
     sd      t3, (PHY_ADDRESS + 0x010)(t8)
-
-    PRINTSTR("\r\ninit start")
 
 //dll init done check
 1:
@@ -3849,14 +4177,6 @@ dll_lock_check:
     beqz    t3, dll_lock_check
     nop
 
-    ld      t1, 0x908(t8)
-    PRINTSTR("\r\n908:")
-    dsrl    a0, t1, 32
-    bal     hexserial
-    nop
-    move    a0, t1
-    bal     hexserial
-    nop
 #if (SEL_DBL==0)//select small dll
 #ifdef SELECT_SMALL_DLL
     lb      t3, DLL_OUT(t8)
@@ -3871,81 +4191,39 @@ dll_lock_check:
     b       2f
     nop
 1:      //total reset
-    GET_NODE_ID_a0
-    dli     t1, 0x900000001fe00180
-    or      t1, t1, a0
-    ld      t0, 0x0(t1)
-    dli     t2, 0x1<<7
-    beqz    k0, 1f
+    move    a1, k0
+    bal     enable_mc_reset
     nop
-    dsll    t2, t2, 5
-1:
-    not     t2, t2
-    and     t0, t0, t2
-    sd      t0, 0x0(t1)
-
-    dli     t3, 0x1000
-1:
-    dsubu   t3, t3, 1
-    bnez    t3, 1b
+    WAIT_FOR(0x3000)
+    move    a1, k0
+    bal     disable_mc_reset
     nop
+    WAIT_FOR(0x3000)
 
-    not     t2, t2
-    or      t0, t0, t2
-    sd      t0, 0x0(t1)
-
-    dli     t3, 0x1000
-1:
-    dsubu   t3, t3, 1
-    bnez    t3, 1b
-    nop
-
-    PRINTSTR("\r\n begin Reset MC ")
-    move    a2, k1
     b       mc_reset
     nop
 2:
+    PRINTSTR("\r\n908:")
+    ld      a0, 0x908(t8)
+    bal     ddr_hexserial64
+    nop
 #endif
 #endif
 
 set_clk_en:
 #ifdef DCC_CTR
-    PRINTSTR("\r\nbefore change REG0x44: ")
-    lw      a0, 0x44(t8)
-    bal     hexserial
-    nop
 //bypass clk2x dcc
     lw      t3, 0x44(t8)
     dli     t4, (0x1 << 14)
     not     t4
     and     t3, t4
     sw      t3, 0x44(t8)
-
-    PRINTSTR("\r\nafter change REG0x44: ")
-    lw      a0, 0x44(t8)
-    bal     hexserial
-    nop
-
-    PRINTSTR("\r\nbefore change REG0x74: ")
-    lw      a0, 0x74(t8)
-    bal     hexserial
-    nop
 //bypass clk2x dcc
     lw      t3, 0x74(t8)
     dli     t4, (0x1 << 14)
     not     t4
     and     t3, t4
     sw      t3, 0x74(t8)
-
-    PRINTSTR("\r\nafter change REG0x74: ")
-    lw      a0, 0x74(t8)
-    bal     hexserial
-    nop
-
-    PRINTSTR("\r\nbefore change REG0xb4: ")
-    lw      a0, 0xb4(t8)
-    bal     hexserial
-    nop
 //bypass clk2x dcc
     lw      t3, 0xb4(t8)
     dli     t4, (0x1 << 14)
@@ -3953,16 +4231,7 @@ set_clk_en:
     and     t3, t4
     sw      t3, 0xb4(t8)
 
-    PRINTSTR("\r\nafter change REG0xb4: ")
-    lw      a0, 0xb4(t8)
-    bal     hexserial
-    nop
-
-    dli     t4, WAIT_ITEM
-1:
-    dsubu   t4, 1
-    bnez    t4, 1b
-    nop
+    WAIT_FOR(WAIT_ITEM)
 #endif
 
 //clk2x enable
@@ -4042,101 +4311,356 @@ set_clk_en:
     bal     hexserial
     nop
 #endif
-    PRINTSTR("\r\ninit done")
 
-#ifdef CAL_ENABLE
-//calculate tCKAVG and store in t0
-	dli	    	t0, DDR_FREQ
-    dsll        t0, t0, 1
-    dli         t1, 1000000
-    dmulou      t0, t0, t1
-	dli	    	t2, 0xe8d4a51000
-	ddivu		t0, t2, t0
+    GET_DIMM_TYPE_V1
+    andi    a1, a1, 1
+    beqz    a1, rcd_config_done
+    nop
 
-	dli			t1, 3748
-	dli			t4, 3
-	dmulou		t2, t0, t4
-	bgeu		t1, t2, 1f
-	nop
-	dli			t2, 3
-	b			2f
-	nop
+#ifndef DDR3_DIMM
+//RDIMM
+//set mirror and RDIMM snoop in F0RC0D in RCD
+    GET_ADDR_MIRROR_V1
+    beqz    a1, 1f
+    nop
+
+    li      mrs_cmd_a, 0xdc
+    b       2f
+    nop
 1:
-    move        a1, t1
-    move        a0, t0
-    bal	int_rounding
-	nop
-    move        t2, v0      //t2 means tCAL
+    li      mrs_cmd_a, 0xd4
 2:
-//first enable CAL by mrs
-//enter command mode
-    li      t1, 0x1
-    sb      t1, CMD_OFFSET(t8)
+    RDIMM_MR7_SEND(mrs_cmd_a)
 
-    li      t1, 0x0
-    sb      t1, CMD_REQ_OFFSET(t8)
+//set CA CS drive strength in F0RC03 in RCD
+    GET_SPD(0x89)
+    dsrl    mrs_cmd_a, v0, 4
+    or      mrs_cmd_a, 0x30
+    RDIMM_MR7_SEND(mrs_cmd_a)
 
-1:
-    lbu     t1, CMD_STATUS_OFFSET(t8)
-    beqz    t1, 1b
+//set ODT CKE drive strength in F0RC04 in RCD
+    GET_SPD_CACHE(0x89)
+    and     mrs_cmd_a, v0, 3
+    sll     mrs_cmd_a, 2
+    srl     v0, 2
+    andi    v0, 0x3
+    or      mrs_cmd_a, v0
+    or      mrs_cmd_a, 0x40
+    RDIMM_MR7_SEND(mrs_cmd_a)
+
+//set Clock drive strength in F0RC05 in RCD
+    GET_SPD_CACHE(0x8a)
+    and     mrs_cmd_a, v0, 3
+    sll     mrs_cmd_a, 2
+    srl     v0, 2
+    andi    v0, 0x3
+    or      mrs_cmd_a, v0
+    or      mrs_cmd_a, 0x50
+    RDIMM_MR7_SEND(mrs_cmd_a)
+
+//set RDIMM operate speed in F0RC0A in RCD
+    dli     a0, DDR_FREQ
+    dsll    a0, 2
+    bgtu    a0, 1600, 1f
     nop
-
-//set mrs_cmd
-    li      t1, 0xff
-    sb      t1, CMD_CKE_OFFSET(t8)
-
-    li      t1, 0x0
-    sb      t1, CMD_C_OFFSET(t8)
-
-    li      t1, 0x8//mrs
-    sb      t1, CMD_CMD_OFFSET(t8)
-
-    lh      t1, DDR4_MR4_CS0_REG(t8)
-    move    t0, t2
-    bleu    t2, 6, 1f
+    dli     a0, 0
+    b       2f
     nop
-    dsubu   t2, t2, 1
 1:
-    dsubu   t2, t2, 2
-    andi    t2, 0x7
-    dsll    t2, t2, 6
-    dli     t3, ~(0x7<<6)
-    and     t1, t1, t3
-    or      t1, t1, t2
-    sh      t1, CMD_A_OFFSET(t8)
-
-    //select MRS4
-    li      t1, 0x0
-    sb      t1, CMD_BA_OFFSET(t8)
-    li      t1, 0x1
-    sb      t1, CMD_BG_OFFSET(t8)
-
-    li      t1, 0xfe
-    sb      t1, CMD_CS_OFFSET(t8)//TODO, now only support cs0
-
-//send cmd
-    li      t1, 0x1
-    sb      t1, CMD_REQ_OFFSET(t8)
-
-    dli     t1, 0x60
-1:
-    subu    t1, 1
-    bnez    t1, 1b
+    bgtu    a0, 1867, 1f
     nop
-
-    li      t1, 0x0
-    sb      t1, CMD_REQ_OFFSET(t8)
-
-    li      t1, 0x0
-    sb      t1, CMD_OFFSET(t8)
-
-	sb			t0, 0x106c(t8)
-
-    lb      t0, 0x808(t8)
-    dli     t1, ~(0x1)
-    and     t0, t0, t1
-    sb      t0, 0x808(t8)
+    dli     a0, 1
+    b       2f
+    nop
+1:
+    bgtu    a0, 2134, 1f
+    nop
+    dli     a0, 2
+    b       2f
+    nop
+1:
+    bgtu    a0, 2400, 1f
+    nop
+    dli     a0, 3
+    b       2f
+    nop
+1:
+    bgtu    a0, 2667, 1f
+    nop
+    dli     a0, 4
+    b       2f
+    nop
+1:
+    dli     a0, 0x5
+2:
+#if (SEL_DBL == 1)
+#if (DDR_FREQ != 400)
+    dsrl    v0, s5, 32
+    and     v0, 1
+    beqz    v0, 1f
+    nop
+    /* bypass RCD pll */
+    GET_DBL_DCC_TRAIN_CURRENT_LOOP_NUM
+    bgeu    v0, DBL_DCC_TRAIN_LOOP_TIMES, 1f
+    nop
+    dli     a0, 7
+1:
 #endif
+#endif
+    or      mrs_cmd_a, a0, 0xa0
+    RDIMM_MR7_SEND(mrs_cmd_a)
+
+//set RDIMM fine granularity of RDIMM operating speed in RC3x in RCD
+    dli     a0, DDR_FREQ
+    dsll    a0, 2
+    bgtu    a0, 1240, 1f
+    nop
+    dli     a0, 0
+    b       2f
+    nop
+1:
+    dsubu   a0, 1240
+    ddivu   a0, a0, 20
+    mfhi    t0
+    bnez    t0, 2f
+    nop
+    dsubu   a0, 1
+2:
+    or      mrs_cmd_a, a0, 0x300
+    RDIMM_MR7_SEND(mrs_cmd_a)
+
+    /* power saving setting */
+    /* F0RC09*/
+    GET_CS_NUM_DDR4
+    bgtu    v0, 1, 1f
+    nop
+    dli     mrs_cmd_a, 0x93
+    RDIMM_MR7_SEND(mrs_cmd_a)
+1:
+    /* F0RC08*/
+    dli     mrs_cmd_a, 0x84
+    /* disable QC[2:0] */
+    dli     a1, 0x3
+    GET_CS_NUM_DDR4
+    bne     v0, 4, 1f
+    nop
+    and     a1, 0x1
+1:
+    or      mrs_cmd_a, a1
+    /* disable DA17 */
+    GET_ROW_SIZE_V1
+    beqz    a1, 1f
+    nop
+    or      mrs_cmd_a, 0x8
+1:
+    RDIMM_MR7_SEND(mrs_cmd_a)
+    /* F0RC02 */
+    dli     mrs_cmd_a, 0x22
+    GET_ROW_SIZE_V1
+    beqz    a1, 1f
+    nop
+    or      mrs_cmd_a, 0x1
+1:
+    RDIMM_MR7_SEND(mrs_cmd_a)
+
+    /*send mrs to side B for rdimm*/
+    /*get cs number in t1 */
+    GET_CS_NUM_DDR4
+    move    t1, v0
+
+    /*mrs send for different mrs loop, mrs_num followring thr ddr init sequence:3,6,5,4,2,1,0*/
+    li      t2, 0       //mrs number ctrl
+5:
+    /*mrs send for different cs loop*/
+    dsubu   t0, t1, 1   //cs number ctrl
+2:
+    dsll    t3, t0, 4
+    daddu   t3, t8
+    /*translate mrs_number ctrl t2 to mrs_num */
+    bnez    t2, 1f
+    nop
+    li      mrs_num, 3
+    b       3f
+    nop
+1:
+    subu    mrs_num, t2, 7
+    abs     mrs_num
+    bleu    t2, 3, 3f
+    nop
+    subu    mrs_num, 1
+3:
+    dsll    t4, mrs_num, 1
+    daddu   t3, t4
+    lh      mrs_cmd_a, DDR4_MR0_CS0_REG(t3)
+    move    mrs_cs, t0
+    MRS_SEND(mrs_cmd_a,mrs_cs,mrs_num)
+    /*mrs send for different cs loop ctrl */
+    dsubu   t0, 1
+    bgez    t0, 2b
+    nop
+
+    /*mrs send for different mrs loop ctrl*/
+    daddu   t2, 1
+    bleu    t2, 6, 5b
+    nop
+
+    //sync time
+    ld      t3, (PHY_ADDRESS + 0x010)(t8)
+    ld      t3, (PHY_ADDRESS + 0x010)(t8)
+    ld      t3, (PHY_ADDRESS + 0x010)(t8)
+
+#endif
+
+rcd_config_done:
+
+#if (SEL_DBL == 1)
+#if (DDR_FREQ == 533)
+    lb      t0, 0x36(t8)
+    bltu    t0, 0x40, 1f
+    nop
+
+    bleu    t0, 0x41, 2f
+    nop
+
+    b       3f
+    nop
+1:
+    dli     t0, 0x95
+    sb      t0, DBL_CFG(t8)
+    b       3f
+    nop
+2:
+    dli     t0, 0x96
+    sb      t0, DBL_CFG(t8)
+3:
+#endif
+#if (DDR_FREQ != 400)
+    dsrl    v0, s5, 32
+    and     v0, 1
+    beqz    v0, 3f
+    nop
+    GET_DBL_DCC_TRAIN_CURRENT_LOOP_NUM
+    bgeu    v0, DBL_DCC_TRAIN_LOOP_TIMES, 2f
+    nop
+    beqz    v0, 1f
+    nop
+#ifdef DBL_CK_TRAINING_DEBUG
+    PRINTSTR("\r\nThe ")
+    GET_DBL_DCC_TRAIN_CURRENT_LOOP_NUM
+    move    a0, v0
+    DDR_TTYBYTE
+    PRINTSTR("th loop ")
+#endif
+1:
+#ifdef DBL_CK_TRAINING_DEBUG
+    PRINTSTR("\r\np = ")
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(P)
+    move    a0, v0
+    DDR_TTYBIT
+    PRINTSTR(", n = ")
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(N)
+    move    a0, v0
+    DDR_TTYBIT
+#endif
+    /* DBL CLK training */
+    bal     dbl_clk_training
+    nop
+
+    /* mc reset */
+    move    a1, k0
+    bal     enable_mc_reset
+    nop
+    WAIT_FOR(0x30000)
+    move    a1, k0
+    bal     disable_mc_reset
+    nop
+
+    /* loop control */
+    GET_DBL_DCC_TRAIN_CURRENT_LOOP_NUM
+    bnez    v0, mc_reset
+    nop
+
+    /* dcc couple loop ctrl */
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(N)
+    beq     v0, 7, 1f
+    nop
+    daddu   v0, 1
+    STORE_DBL_DCC_TRAIN_CURRENT_DCC(N)
+    b       mc_reset
+    nop
+1:
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(P)
+    beq     v0, 7, 1f
+    nop
+    daddu   v0, 1
+    STORE_DBL_DCC_TRAIN_CURRENT_DCC(P)
+    dli     v0, 0
+    STORE_DBL_DCC_TRAIN_CURRENT_DCC(N)
+    b       mc_reset
+    nop
+
+    /* dcc couple loop end */
+1:
+    dli     v0, 1
+    STORE_DBL_DCC_TRAIN_CURRENT_LOOP_NUM
+    dli     t1, 0
+    GET_DBL_DCC_TRAIN_STORED_DCC(t1)
+    STORE_DBL_DCC_TRAIN_CURRENT_DCC_VALUE
+    b       mc_reset
+    nop
+2:
+    PRINTSTR("\r\ns5 = ")
+    dsrl    a0, s5, 32
+    bal     hexserial
+    nop
+    PRINTSTR("_")
+    move    a0, s5
+    bal     hexserial
+    nop
+    PRINTSTR(", final result is : p = ")
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(P)
+    move    a0, v0
+    DDR_TTYBIT
+    PRINTSTR(", n = ")
+    GET_DBL_DCC_TRAIN_CURRENT_DCC(N)
+    move    a0, v0
+    DDR_TTYBIT
+3:
+    /* store dbl clk dcc */
+    /* t3:save sdram base */
+    GET_NODE_ID_a1
+    mul     a1, DIMM_INFO_SIZE
+    dli     t3, DIMM_INFO_IN_CACHE_OFFS
+    daddu   t3, a1
+    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
+    daddu   t3, a0
+    lb      t0, DDR4_DBL_CTRL_CKCA_OFFSET(t8)
+    dsrl    t0, 2
+    and     v0, t0, 7
+    and     v1, t0, 7<<3
+    dsll    v1, 1
+    or      v0, v1
+    sb      v0, DIMM_OFFS_DBL_CFG(t3)
+#endif
+#endif
+
+#ifndef DISABLE_CAL
+    lw      v0, DDR4_PAD_CTRL_CA(t8)
+    and     v0, ~(0x1)
+    sw      v0, DDR4_PAD_CTRL_CA(t8)
+#endif
+
+    /*disable dll reset in MR REG*/
+    li      t1, 0
+    move    t2, t8
+1:
+    lh      t0, DDR4_MR0_CS0_REG(t2)
+    and     t0, t0, ~(0x1<<8)
+    sh      t0, DDR4_MR0_CS0_REG(t2)
+    daddu   t1, t1, 1
+    daddu   t2, t2, 0x10
+    bleu    t1, 7, 1b
+    nop
 
     move    ra, t7
     jr      ra

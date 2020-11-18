@@ -64,13 +64,19 @@ extern char           *heaptop;
 #define	DTB_OFFS		(NVRAM_OFFS - DTB_SIZE)
 
 /*
- * ----------------------------------------------------------------------------------
- * | CLK0:8 | SLOT0_SPD0:8 | SLOT1_SPD0:8 | VREF0:12 | BIT_TRAIN0:252 | DDR_VREF0:8 |
- * | CLK1:8 | SLOT0_SPD1:8 | SLOT0_SPD1:8 | VREF1:12 | BIT_TRAIN1:252 | DDR_VREF1:8 |
- * ----------------------------------------------------------------------------------
+ * -----------------------------------------------------------------------------------------------
+ * | CLK0:8 | SLOT0_SPD0:8 | SLOT1_SPD0:8 | VREF0:12 | BIT_TRAIN0:252 | DDR_VREF0:8 | DBL_CFG0:1 |
+ * | CLK1:8 | SLOT0_SPD1:8 | SLOT0_SPD1:8 | VREF1:12 | BIT_TRAIN1:252 | DDR_VREF1:8 | DBL_CFG1:1 |
+ * -----------------------------------------------------------------------------------------------
  */
 #define DIMM_INFO_IN_FLASH_OFFS	(0xbfc00000 + DTB_OFFS - 0x1000)
-#define DIMM_INFO_IN_CACHE_OFFS  0x9800000010000000
+#define DIMM_INFO_IN_CACHE_OFFS  (0x9800000000000000 | LOCK_SCACHE_ADDR)
+#define LOCK_SCACHE_ADDR         0x90000000
+#define MC_PARAM_IN_CACHE_OFFS   0x8000
+#define DIMM_SPD_STORED_OFFS     0x4000
+#define DDR_TRAIN_FLAG_OFFS      0x2000
+#define SLOT0_SPD_OFFS           0x2008
+#define LOCK_SCACHE_MASK         0xffffffffffff0000
 #define DIMM_INFO_IN_SDRAM_OFFS  0x8fff0000
 #define DIMM_OFFS_CLK		0
 #define DIMM_OFFS_SLOT0_SPD 8
@@ -78,6 +84,8 @@ extern char           *heaptop;
 #define DIMM_OFFS_VREF		24
 #define DIMM_OFFS_BIT_TRAIN 36
 #define DIMM_OFFS_DDR_VREF  288
+#define DIMM_OFFS_DBL_CFG   296
+#define DBL_DCC_TRAIN_OFFS  0xc00
 
 #define DIMM_INFO_SIZE		608
 #define MC_INFO_SIZE		304

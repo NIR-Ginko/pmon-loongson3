@@ -1446,9 +1446,14 @@ no_reboot:
 //#define TWO_T_MODE_ENABLE
 //#define DISABLE_DIMM_ECC
 //#define SET_RL_MANUALY  12
+//#define BL4
 #define DISABLE_READ_DBI
 #define DISABLE_WRITE_DBI
+#define DISABLE_CAL
+//#define DISABLE_DM
 #define PRINT_MSG
+//#define MC_VREF_ADJUST  -8
+#define DDR_VREF_INIT   0x25
 //#define TPHY_WR_MODE0
 #ifndef ARB_LEVEL
 //#define FIX_DDR_PARAM
@@ -1497,7 +1502,7 @@ no_reboot:
 
 #ifdef  AUTO_DDR_CONFIG
 #define N0_MC0_SLOT0_I2C_ADDR 0x0
-#if !defined(CHIP_4)
+#if !defined(MULTI_CHIP)
 #define N0_MC0_SLOT1_I2C_ADDR 0xf
 #ifndef DDR3_DIMM
 #define N0_MC1_SLOT0_I2C_ADDR 0x2
@@ -1505,6 +1510,10 @@ no_reboot:
 #define N0_MC1_SLOT0_I2C_ADDR 0x1
 #endif
 #define N0_MC1_SLOT1_I2C_ADDR 0xf
+#elif   !defined(CHIP_4)
+#define N0_MC0_SLOT1_I2C_ADDR 0x1
+#define N0_MC1_SLOT0_I2C_ADDR 0x2
+#define N0_MC1_SLOT1_I2C_ADDR 0x3
 #else
 #define N0_MC0_SLOT1_I2C_ADDR 0xf
 #define N0_MC1_SLOT0_I2C_ADDR 0x2
@@ -1537,13 +1546,24 @@ no_reboot:
 	VREF_SET(VREF)
 
 #if	defined(ENABLE_MC_VREF_TRAINING) && defined(VREF_STORE)
+    sync
 	PRINTSTR("\r\nLock Scache\r\n")
 	dli	a2, LOCK_SCACHE_CONFIG_BASE_ADDR
-	dli	a3, 0xfffffffffffff000
+	dli	a3, LOCK_SCACHE_MASK
 	sd	a3, 0x48(a2)
-	dli	a3, 0x8000000010000000
+	dli	a3, (0x8000000000000000 | LOCK_SCACHE_ADDR)
 	sd	a3, 0x8(a2)
 	sync
+    dli     t0, DIMM_INFO_IN_CACHE_OFFS
+    dli     v0, 0
+1:
+    ld      a0, 0x0(t0)
+    daddu   t0, 0x40
+    daddu   v0, 0x40
+    bltu    v0, ((~LOCK_SCACHE_MASK) + 1), 1b
+    nop
+	sync
+
 	PRINTSTR("Lock Scache Done.\r\n")
 #endif
 
@@ -1555,10 +1575,10 @@ no_reboot:
 
 #ifdef  AUTO_DDR_CONFIG
 #if !defined(CHIP_4)
-#define N1_MC0_SLOT0_I2C_ADDR 0x4
-#define N1_MC0_SLOT1_I2C_ADDR 0x5
-#define N1_MC1_SLOT0_I2C_ADDR 0x6
-#define N1_MC1_SLOT1_I2C_ADDR 0x7
+#define N1_MC0_SLOT0_I2C_ADDR 0x0
+#define N1_MC0_SLOT1_I2C_ADDR 0x1
+#define N1_MC1_SLOT0_I2C_ADDR 0x2
+#define N1_MC1_SLOT1_I2C_ADDR 0x3
 #else
 #define N1_MC0_SLOT0_I2C_ADDR 0x0
 #define N1_MC0_SLOT1_I2C_ADDR 0xf
@@ -1664,7 +1684,7 @@ no_reboot:
 //invalid scache
 	//dli	a0, 0x9800000010000000
 	dli	a0, 0xffffffff90000000
-	li	a1, 0x1000
+	li	a1, ((~LOCK_SCACHE_MASK) + 1)
 	//bal	CPU_HitInvalidateSCache
 	bal	LS3A4000_HitInvalidateSCache
 	nop
@@ -2482,6 +2502,7 @@ idle1000:
 #include "../../../pmon/arch/mips/ls7a/ls3a7a_setup_ht_link.S"
 #include "../../../pmon/arch/mips/ls7a/ls3a7a_ht_init.S"
 #include "../../../pmon/arch/mips/ls7a/ls7a_config.S"
+#include "ddr4_dir/dbl_clk_training.h"
 #include "ddr_dir/loongson3A4000_mc_init.S"
 #ifdef  LS7A_GMEM_CFG
 #include "ddr_dir/ls7A_gmem_config.S"
@@ -2489,9 +2510,13 @@ idle1000:
 //#ifdef DDR3_DIMM
 #include "../../../pmon/arch/mips/mm/loongson3C_ddr3_leveling.S"
 //#else
+#include "ddr4_dir/dbl_clk_training.S"
 #include "ddr4_dir/ddr4_leveling.S"
 #include "ddr4_dir/mc_vref_training.S"
 #include "ddr4_dir/mc_config.S"
+#if (DDR_FREQ == 400)
+#include "ddr4_dir/clk_training.S"
+#endif
 //#endif
 #ifdef ARB_LEVEL
 #include "ddr_dir/ARB_level_new.S"

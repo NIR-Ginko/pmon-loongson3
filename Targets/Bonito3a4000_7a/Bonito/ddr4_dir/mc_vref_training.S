@@ -401,6 +401,7 @@ vref_set:
 	nop
     dsrl    t0, 1
     bnez    t0, vref_set
+    nop
 #ifdef VREF_TRAINING_DEBUG
 	PRINTSTR("Vref training failing!!!  Vref_value set as default value\r\n")
 #endif
@@ -452,7 +453,9 @@ vref_set:
     dsubu   t6, t3, t6
     daddu   t7, t7, t6
     daddu   t7, t7, 1
-
+#ifdef  MC_VREF_ADJUST
+    dsubu   t7, MC_VREF_ADJUST
+#endif
 #ifdef VREF_TRAINING_DEBUG
 	PRINTSTR("Vref_value is :")
 	dsrl	a0, vref_value, 32

@@ -29,12 +29,29 @@
     or      x, z
 
 #define DDR_TTYBIT \
+    and     a0, 0xf;\
 	la	v0, hexchar;\
 	daddu	v0, s0;\
 	daddu	v0, a0;\
     dsubu   v0, 0x2000000;\
 	bal	tgt_putchar;\
 	lbu	a0, 0(v0)
+
+#define DDR_TTYBYTE \
+    and     a0, 0xff;\
+	move	a1, a0;\
+	li	a3, 1;\
+    dsrl    a0, 4;\
+	and	a0, 0xf;\
+81:;\
+	la	v0, hexchar;\
+	daddu	v0, s0;\
+	daddu	v0, a0;\
+	bal	tgt_putchar;\
+	lbu	a0, 0(v0);\
+    and     a0, a1, 0xf;\
+	bnez	a3, 81b;\
+	daddu	a3, -1
 
 #define DDR_TTYSTRING(x) \
     .rdata;\
@@ -68,6 +85,14 @@
     .set    mips3;\
     subu    v0, 32;\
     abs     v0, v0
+
+#define GET_SLICE_NUM \
+    lb      v0, DDR4_CHANNEL_WIDTH_OFFSET(t8);\
+    dli     v1, 1;\
+    dsll    v1, v0;\
+    lb      v0, DDR4_ECC_EN_OFFSET(t8);\
+    and     v0, 1;\
+    daddu   v0, v1, v0
 
 #define GET_LVL_CS_NUM \
     lbu     v0, LVL_CS_OFFSET(t8);\
@@ -182,7 +207,7 @@ mc_init:
     move    a1, k0
     bal     enable_mc_conf_space
     nop
-
+mc_init_again:
     GET_NODE_ID_a0;
     dli     t8, DDR_MC_CONFIG_BASE
     or      t8, t8, a0
@@ -282,7 +307,6 @@ mc_init:
     b       9f
     nop
 9:
-
     bal     mc_config
     nop
 
@@ -349,226 +373,14 @@ mc_init:
 #endif
 
 #ifndef DISABLE_HARD_LEVELING
-    //DDR3 SDRAM, do hard leveling
     PRINTSTR("\r\nStart Hard Leveling...")
     TTYDBG("\r\nEnable register space of MEMORY\r\n")
     move    a1, k0
     bal     enable_mc_conf_space
     nop
 
-
 4:
 
-wait_dram_init_done_new:
-    ld      t0, (CTL_ADDRESS + 0x100)(t8)
-    andi    t1, t0, 0xff     //cs_enable
-    ld      t0, (PHY_ADDRESS + DRAM_INIT)(t8)
-    andi    t0, t0, 0xff00
-    dsrl    t0, t0, 0x8
-    bne     t0, t1, wait_dram_init_done_new
-    nop
-
-    GET_DIMM_TYPE_V1
-    andi    a1, a1, 1
-    beqz    a1, leveling
-    nop
-
-    PRINTSTR("\r\nStart to config RCD")
-
-#ifndef DDR3_DIMM
-//RDIMM
-//set mirror and RDIMM snoop in F0RC0D in RCD
-    GET_ADDR_MIRROR_V1
-    beqz    a1, 1f
-    nop
-
-    li      mrs_cmd_a, 0xdc
-    b       2f
-    nop
-1:
-    li      mrs_cmd_a, 0xd4
-2:
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-//set CA CS drive strength in F0RC03 in RCD
-    GET_SPD(0x89)
-    dsrl    mrs_cmd_a, v0, 4
-    or      mrs_cmd_a, 0x30
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-//set ODT CKE drive strength in F0RC04 in RCD
-    GET_SPD(0x89)
-    and     mrs_cmd_a, v0, 3
-    sll     mrs_cmd_a, 2
-    srl     v0, 2
-    andi    v0, 0x3
-    or      mrs_cmd_a, v0
-    or      mrs_cmd_a, 0x40
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-//set Clock drive strength in F0RC05 in RCD
-    GET_SPD(0x8a)
-    and     mrs_cmd_a, v0, 3
-    sll     mrs_cmd_a, 2
-    srl     v0, 2
-    andi    v0, 0x3
-    or      mrs_cmd_a, v0
-    or      mrs_cmd_a, 0x50
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-//set RDIMM operate speed in F0RC0A in RCD
-    dli     a0, DDR_FREQ
-    dsll    a0, 2
-    bgtu    a0, 1600, 1f
-    nop
-    dli     a0, 0
-    b       2f
-    nop
-1:
-    bgtu    a0, 1867, 1f
-    nop
-    dli     a0, 1
-    b       2f
-    nop
-1:
-    bgtu    a0, 2134, 1f
-    nop
-    dli     a0, 2
-    b       2f
-    nop
-1:
-    bgtu    a0, 2400, 1f
-    nop
-    dli     a0, 3
-    b       2f
-    nop
-1:
-    bgtu    a0, 2667, 1f
-    nop
-    dli     a0, 4
-    b       2f
-    nop
-1:
-    dli     a0, 0x5
-2:
-    or      mrs_cmd_a, a0, 0xa0
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-//set RDIMM fine granularity of RDIMM operating speed in RC3x in RCD
-    dli     a0, DDR_FREQ
-    dsll    a0, 2
-    bgtu    a0, 1240, 1f
-    nop
-    dli     a0, 0
-    b       2f
-    nop
-1:
-    dsubu   a0, 1240
-    ddivu   a0, a0, 20
-    mfhi    t0
-    bnez    t0, 2f
-    nop
-    dsubu   a0, 1
-2:
-    or      mrs_cmd_a, a0, 0x300
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-    /* power saving setting */
-    /* F0RC09*/
-    GET_CS_NUM_DDR4
-    bgtu    v0, 1, 1f
-    nop
-    dli     mrs_cmd_a, 0x93
-    RDIMM_MR7_SEND(mrs_cmd_a)
-1:
-    /* F0RC08*/
-    dli     mrs_cmd_a, 0x84
-    /* disable QC[2:0] */
-    dli     a1, 0x3
-    GET_CS_NUM_DDR4
-    bne     v0, 4, 1f
-    nop
-    and     a1, 0x1
-1:
-    or      mrs_cmd_a, a1
-    /* disable DA17 */
-    GET_ROW_SIZE_V1
-    beqz    a1, 1f
-    nop
-    or      mrs_cmd_a, 0x8
-1:
-    RDIMM_MR7_SEND(mrs_cmd_a)
-    /* F0RC02 */
-    dli     mrs_cmd_a, 0x22
-    GET_ROW_SIZE_V1
-    beqz    a1, 1f
-    nop
-    or      mrs_cmd_a, 0x1
-1:
-    RDIMM_MR7_SEND(mrs_cmd_a)
-
-    PRINTSTR("\r\nConfig RCD done\r\n")
-
-    /*send mrs to side B for rdimm*/
-    /*get cs number in t1 */
-    GET_CS_NUM_DDR4
-    move    t1, v0
-
-    /*mrs send for different cs loop*/
-    li      t0, 0       //cs number ctrl
-5:
-    /*mrs send for different mrs loop, mrs_num followring thr ddr init sequence:3,6,5,4,2,1,0*/
-    li      t2, 0       //mrs number ctrl
-2:
-    dsll    t3, t0, 4
-    daddu   t3, t8
-    /*translate mrs_number ctrl t2 to mrs_num */
-    bnez    t2, 1f
-    nop
-    li      mrs_num, 3
-    b       3f
-    nop
-1:
-    subu    mrs_num, t2, 7
-    abs     mrs_num
-    bleu    t2, 3, 3f
-    nop
-    subu    mrs_num, 1
-3:
-    dsll    t4, mrs_num, 1
-    daddu   t3, t4
-    lh      mrs_cmd_a, DDR4_MR0_CS0_REG(t3)
-    move    mrs_cs, t0
-    MRS_SEND(mrs_cmd_a,mrs_cs,mrs_num)
-    /*mrs send for different mrs loop ctrl*/
-    daddu   t2, 1
-    bleu    t2, 6, 2b
-    nop
-
-    /*mrs send for different cs loop ctrl */
-    daddu   t0, 1
-    bltu    t0, t1, 5b
-    nop
-
-    //sync time
-    ld      t3, (PHY_ADDRESS + 0x010)(t8)
-    ld      t3, (PHY_ADDRESS + 0x010)(t8)
-    ld      t3, (PHY_ADDRESS + 0x010)(t8)
-
-#endif
-
-leveling:
-    /*disable dll reset in MR REG*/
-    li      t1, 0
-    move    t2, t8
-1:
-    lh      t0, DDR4_MR0_CS0_REG(t2)
-    and     t0, t0, ~(0x1<<8)
-    sh      t0, DDR4_MR0_CS0_REG(t2)
-    daddu   t1, t1, 1
-    daddu   t2, t2, 0x10
-    bleu    t1, 7, 1b
-    nop
 //load vref store
 #ifndef DDR3_DIMM
 #ifdef VREF_STORE
@@ -582,39 +394,11 @@ leveling:
     beq     a1, 0x10, 4f
     nop
 #endif
-/* t1:save flash base; t2:save slot 1 SPD info; t4:save slot 2 SPD info; */
-    GET_NODE_ID_a1
-    mul     a1, DIMM_INFO_SIZE
-    dli     t1, (0xffffffff00000000 | DIMM_INFO_IN_FLASH_OFFS)
-    daddu   t1, a1
-
-    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
-    daddu   t1, a0
-
-#ifdef  AUTO_DDR_CONFIG
-    /* read SPD info */
-    SPD_REGS_INFO(t2,0);
-    SPD_REGS_INFO(t4,1);
-#endif
-
-    /*check DDR freq */
-    li      a1, DDR_FREQ
-    lw      a0, DIMM_OFFS_CLK(t1)
-    bne     a1, a0, 4f
+    /* check whether to train */
+    dli     t1, (DIMM_INFO_IN_CACHE_OFFS + DDR_TRAIN_FLAG_OFFS)
+    lb      v0, 0x0(t1)
+    bnez    v0, 4f
     nop
-
-#ifdef  AUTO_DDR_CONFIG
-    /*mc0:k0=0; mc1:k0=1*/
-    /* check slot0 SPD info */
-    ld      a0, DIMM_OFFS_SLOT0_SPD(t1)
-    bne     t2, a0, 4f
-    nop
-    /* check slot1 SPD info */
-    ld      a0, DIMM_OFFS_SLOT1_SPD(t1)
-    bne     t4, a0, 4f
-    nop
-#endif
-
 #ifdef ENABLE_MC_VREF_TRAINING
     /*Using configuration in flash*/
     daddu   t4, t8, VREF_CTRL_DS0_OFFSET
@@ -714,7 +498,7 @@ leveling:
 #endif
 
 #ifdef  DEBUG_DDR_PARAM   //print registers
-    PRINTSTR("The MC param before leveling is:\r\n")
+    PRINTSTR("\r\nThe MC param before leveling is:\r\n")
     PRINTSTR("PHY:\r\n")
     dli     t1, 290
     GET_NODE_ID_a0
@@ -817,6 +601,22 @@ leveling:
     bal     ddr4_leveling
     nop
 
+    /* check leveling fail */
+    dsrl    s6, 32
+    and     s6, 1
+    beqz    s6, 1f
+    nop
+    PRINTSTR("\r\nleveling error, init again!!!")
+    move    a1, k0
+    bal     enable_mc_reset
+    nop
+    WAIT_FOR(0x30000)
+    move    a1, k0
+    bal     disable_mc_reset
+    nop
+    b       mc_init_again
+    nop
+1:
     /* now dram read is accessable */
     move    a1, k0
     bal     disable_mc_regs_default
@@ -824,41 +624,11 @@ leveling:
 
 #ifndef DDR3_DIMM
 #ifdef VREF_STORE
-/* t1:save flash base; t2:save SPD info; t3:save sdram base; */
-    GET_NODE_ID_a1
-    mul     a1, DIMM_INFO_SIZE
-    dli     t3, DIMM_INFO_IN_CACHE_OFFS
-    daddu   t3, a1
-    dli     t1, (0xffffffff00000000 | DIMM_INFO_IN_FLASH_OFFS)
-    daddu   t1, a1
-
-    mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
-    daddu   t3, a0
-    daddu   t1, a0
-
-#ifdef  AUTO_DDR_CONFIG
-    /* read SPD info */
-    SPD_REGS_INFO(t2,0);
-    SPD_REGS_INFO(t4,1);
-#endif
-
-    /*check DDR freq */
-    li      a1, DDR_FREQ
-    lw      a0, DIMM_OFFS_CLK(t1)
-    bne     a1, a0, 4f
+    /* check whether to train */
+    dli     t1, (DIMM_INFO_IN_CACHE_OFFS + DDR_TRAIN_FLAG_OFFS)
+    lb      v0, 0x0(t1)
+    bnez    v0, 4f
     nop
-
-#ifdef  AUTO_DDR_CONFIG
-    /*mc0:k0=0; mc1:k0=1*/
-    /* check slot0 SPD info */
-    ld      a0, DIMM_OFFS_SLOT0_SPD(t1)
-    bne     t2, a0, 4f
-    nop
-    /* check slot1 SPD info */
-    ld      a0, DIMM_OFFS_SLOT1_SPD(t1)
-    bne     t4, a0, 4f
-    nop
-#endif
 
     b       vref_end
     nop
@@ -881,7 +651,8 @@ leveling:
     /*set ddr vref*/
     lhu     mrs_cmd_a, DDR4_MR6_CS0_REG(t8)
     and     mrs_cmd_a, ~(0x7f)
-    or      mrs_cmd_a, 0xa5
+    or      mrs_cmd_a, DDR_VREF_INIT
+    or      mrs_cmd_a, 0x80
     li      mrs_cs, 0
     li      mrs_num, 6
     MRS_SEND(mrs_cmd_a,mrs_cs,mrs_num)
@@ -1082,7 +853,24 @@ set_value:
 //tPHY_WRDATA training, to compare the data to decide the value of tPHY_WRDATA
 #define     DDR4_TPHY_WRLAT_STORE    0x3300
     PRINTSTR("\r\nstart training of tPHY_WR\r\n")
+    dli     s6, 0
 tphy_wrlat_train_start:
+    daddu   s6, 1
+    bleu    s6, 0x20000, 1f
+    nop
+
+    move    a1, k0
+    bal     enable_mc_reset
+    nop
+    WAIT_FOR(0x30000)
+    move    a1, k0
+    bal     disable_mc_reset
+    nop
+    PRINTSTR("\r\ntPHY_WR training is error !")
+    b       mc_init_again
+    nop
+
+1:
 
     /*init dly_2x */
     dli     t0, 0
@@ -1321,6 +1109,17 @@ tphy_wrlat_train:
     bleu    t5, 0x10, 1f
     nop
     PRINTSTR("\r\nError in tPHY_WR training")
+
+    move    a1, k0
+    bal     enable_mc_reset
+    nop
+    WAIT_FOR(0x30000)
+    move    a1, k0
+    bal     disable_mc_reset
+    nop
+    b       mc_init_again
+    nop
+20:
     dli     t5, 4
     sb      t5, DDR4_TPHY_WRLAT_OFFSET(t8)
     b       2f
@@ -1627,7 +1426,6 @@ ddr4_tphy_wrlat_set:
 	sd      t2, 0x30(t1)
 	dli     t2, 0xeeeeeeeeeeeeeeee
 	sd      t2, 0x38(t1)
-
 	dli     t3, 0x00ffffffffffffff
 	and	    t1, t1, t3
 	dli     t3, 0x9000000000000000
@@ -1683,13 +1481,11 @@ ddr4_tphy_wrlat_set:
 
 #ifndef DDR3_DIMM
 #ifdef VREF_STORE
-/* t1:save flash base; t2:save SPD info; t3:save sdram base; */
+/* t2,t4:save SPD info; t3:save sdram base; */
     GET_NODE_ID_a1
     mul     a1, DIMM_INFO_SIZE
     dli     t3, DIMM_INFO_IN_CACHE_OFFS
     daddu   t3, a1
-    dli     t1, (0xffffffff00000000 | DIMM_INFO_IN_FLASH_OFFS)
-    daddu   t1, a1
 
 /*first init, write freq into mc0 info to mark it has been done*/
     li      a2, DDR_FREQ
@@ -1735,32 +1531,16 @@ ddr4_tphy_wrlat_set:
 2:
     mul     a0, k0, MC_INFO_SIZE	//if k0==1, add mc1 offset
     daddu   t3, a0
-    daddu   t1, a0
-
-#ifdef  AUTO_DDR_CONFIG
-    /* read SPD info */
-    SPD_REGS_INFO(t2,0);
-    SPD_REGS_INFO(t4,1);
-#endif
 
     /*check DDR freq */
     li      a1, DDR_FREQ
     sw      a1, DIMM_OFFS_CLK(t3)
-    lw      a0, DIMM_OFFS_CLK(t1)
-    bne     a1, a0, 4f
-    nop
 
-#ifdef  AUTO_DDR_CONFIG
-    /*mc0:k0=0; mc1:k0=1*/
-    /* check slot0 SPD info */
-    ld      a0, DIMM_OFFS_SLOT0_SPD(t1)
-    bne     t2, a0, 4f
+    /* check whether to train */
+    dli     v1, (DIMM_INFO_IN_CACHE_OFFS + DDR_TRAIN_FLAG_OFFS)
+    lb      v0, 0x0(v1)
+    bnez    v0, 4f
     nop
-    /* check slot1 SPD info */
-    ld      a0, DIMM_OFFS_SLOT1_SPD(t1)
-    bne     t4, a0, 4f
-    nop
-#endif
 
     b       bit_training_end
     nop
@@ -1768,6 +1548,9 @@ ddr4_tphy_wrlat_set:
 4:
 #ifdef  AUTO_DDR_CONFIG
     /* save SPD info */
+    dli     v1, (DIMM_INFO_IN_CACHE_OFFS + SLOT0_SPD_OFFS)
+    ld      t2, 0x0(v1)
+    ld      t4, 0x8(v1)
     sd      t2, DIMM_OFFS_SLOT0_SPD(t3)
     sd      t4, DIMM_OFFS_SLOT1_SPD(t3)
 #else
@@ -1787,8 +1570,10 @@ ddr4_tphy_wrlat_set:
 #ifdef ENABLE_BIT_TRAINING
     bal	    rd_bit_training
     nop
+#ifndef MULTI_CHIP
     bal	    wr_bit_training
     nop
+#endif
 #endif
 #ifdef VREF_STORE
 //store training result
@@ -1886,7 +1671,7 @@ bit_training_end:
 
 #endif
 #if 1 //def  PRINT_DDR_LEVELING   //print registers
-    PRINTSTR("The MC param after leveling is:\r\n")
+    PRINTSTR("\r\nThe MC param after leveling is:\r\n")
     PRINTSTR("PHY:\r\n")
     dli     t1, 290
     GET_NODE_ID_a0
@@ -1952,7 +1737,7 @@ bit_training_end:
     or      t0, t0, a0
 
 #ifdef  PRINT_DDR_LEVELING   //print registers
-    PRINTSTR("The MC param after leveling is:\r\n")
+    PRINTSTR("\r\nThe MC param after leveling is:\r\n")
     PRINTSTR("PHY:\r\n")
     dli     t1, 290
     GET_NODE_ID_a0
@@ -2527,6 +2312,57 @@ input: a1 - MC select
 	jr      ra
 	nop
 END(disable_mc_regs_default)
+
+LEAF(enable_mc_reset)
+/*********************
+reg used v0, v1, a1
+input: a1 - MC select
+*********************/
+    sync
+    /* MC0 use bit[7], MC1 use bit[12] */
+    dli     v1, 0x1
+    dsll    v1, a1
+    dsll    v1, 7
+    dsll    a1, 2
+    dsll    v1, a1
+    not     v1
+    /* chip configure register address */
+    GET_NODE_ID_a1
+    dsll    a1, 44
+    or      a1, 0x900000003ff00180
+    lw      v0, 0x0(a1)
+    and     v1, v0
+    sw      v1, 0x0(a1)
+	sync
+
+	jr      ra
+	nop
+END(enable_mc_reset)
+
+LEAF(disable_mc_reset)
+/*********************
+reg used v0, v1, a1
+input: a1 - MC select
+*********************/
+    sync
+    /* MC0 use bit[7], MC1 use bit[12] */
+    dli     v1, 0x1
+    dsll    v1, a1
+    dsll    v1, 7
+    dsll    a1, 2
+    dsll    v1, a1
+    /* chip configure register address */
+    GET_NODE_ID_a1
+    dsll    a1, 44
+    or      a1, 0x900000003ff00180
+    lw      v0, 0x0(a1)
+    or      v1, v0
+    sw      v1, 0x0(a1)
+	sync
+
+	jr      ra
+	nop
+END(disable_mc_reset)
 
 LEAF(enable_mc_read_buffer)
 
@@ -3143,3 +2979,105 @@ a1: cmd_a
     jr      ra
     nop
 END(mpr_write)
+
+LEAF(ddr_hexserial64)
+	move	a2, ra
+	move	a1, a0
+	li	a3, 15
+1:
+	drol	a0, a1, 4
+	move	a1, a0
+	and	a0, 0xf
+#ifdef	ROM_EXCEPTION
+	la	v0, (hexchar+0x3ec00000)
+#else
+	la	v0, hexchar
+	daddu	v0, s0
+#endif
+	daddu	v0, a0
+	bal	tgt_putchar
+	lbu	a0, 0(v0)
+
+	bnez	a3, 1b
+	daddu	a3, -1
+
+	move	ra, a2
+	jr	ra
+	nop
+END(ddr_hexserial64)
+
+LEAF(ddr_hexserial16)
+	move	a2, ra
+	move	a1, a0
+	li	a3, 3
+1:
+    dsll    a0, a3, 2
+    dsrl    a0, a1, a0
+	and	    a0, 0xf
+#ifdef	ROM_EXCEPTION
+	la	v0, (hexchar+0x3ec00000)
+#else
+	la	v0, hexchar
+	daddu	v0, s0
+#endif
+	daddu	v0, a0
+	bal	tgt_putchar
+	lbu	a0, 0(v0)
+
+	bnez	a3, 1b
+	daddu	a3, -1
+
+	move	ra, a2
+	jr	ra
+	nop
+END(ddr_hexserial16)
+LEAF(enable_mc_clk)
+/*********************
+reg used v0, v1, a1
+input: a1 - MC select
+*********************/
+    sync
+    /* MC0 use bit[8], MC1 use bit[13] */
+    dli     v1, 0x1
+    dsll    v1, a1
+    dsll    v1, 8
+    dsll    a1, 2
+    dsll    v1, a1
+    /* chip configure register address */
+    GET_NODE_ID_a1
+    dsll    a1, 44
+    or      a1, 0x900000003ff00180
+    lw      v0, 0x0(a1)
+    or      v1, v0
+    sw      v1, 0x0(a1)
+    sync
+
+    jr      ra
+    nop
+END(enable_mc_clk)
+
+LEAF(disable_mc_clk)
+/*********************
+reg used v0, v1, a1
+input: a1 - MC select
+*********************/
+    sync
+    /* MC0 use bit[8], MC1 use bit[13] */
+    dli     v1, 0x1
+    dsll    v1, a1
+    dsll    v1, 8
+    dsll    a1, 2
+    dsll    v1, a1
+    not     v1
+    /* chip configure register address */
+    GET_NODE_ID_a1
+    dsll    a1, 44
+    or      a1, 0x900000003ff00180
+    lw      v0, 0x0(a1)
+    and     v1, v0
+    sw      v1, 0x0(a1)
+    sync
+
+    jr      ra
+    nop
+END(disable_mc_clk)

@@ -37,6 +37,7 @@ ddr4_leveling:
 #endif
 
 write_leveling_new:
+    dli     s6, 0
 #ifdef LVL_DEBUG
     PRINTSTR("\r\nBegin write leveling\r\n")
 #endif
@@ -128,6 +129,14 @@ lvl_ready:
 check_bit_count_reset:
     dli     s7, 0x0
 lvl_req_set:
+    daddu   s6, 1
+    bleu    s6, 0x20000, 1f
+    nop
+    or      s6, 0x1<<32
+    b       ddr4_leveling_end
+    nop
+1:
+
     ld      t2, (PHY_ADDRESS + 0x700)(t8)
     dli     t3, 0xffffffffffff00ff
     and     t2, t2, t3
@@ -758,6 +767,7 @@ write_leveling_exit_new:
     bltu    t0, t2, 1b
     nop
 
+    dli     s6, 0
 gate_leveling_new:
 //init rddata
     dli     t0, 0x3
@@ -838,7 +848,54 @@ glvl_ready:
     bal     print_dqs
     nop
 #endif
+
+    dli     t2, 0x1
+    sb      t2, LVL_REQ_OFFSET(t8)
+1:
+    lb      t2, LVL_DONE_OFFSET(t8)
+    and     t2, 0x1
+    beqz    t2, 1b
+    nop
+
+    dli     t2, 0
+    dli     t0, 0
+    dli     t3, 7
+
+    GET_DIMM_TYPE_V1
+    and     a1, a1, 1
+    beqz    a1, 1f
+    nop
+    daddu   t3, 1
+1:
+    daddu   t1, t8, t0
+    lb      t1, LVL_RESP_OFFSET(t1)
+    and     t1, 0x1
+    or      t2, t1
+    daddu   t0, 1
+    bleu    t0, t3, 1b
+    nop
+
+    daddu   s6, 1
+    bleu    s6, 0x100, 1f
+    nop
+    or      s6, 0x1<<32
+    PRINTSTR("\r\nGate leveling ERROR !")
+    b       ddr4_leveling_end
+    nop
+1:
+
+    bnez    t2, gate_leveling_new
+    nop
+
+    dli     s6, 0
 glvl_req_set_rddata:
+    daddu   s6, 1
+    bleu    s6, 0x20000, 1f
+    nop
+    or      s6, 0x1<<32
+    b       ddr4_leveling_end
+    nop
+1:
     lh      t1, RDDATA_FIND_FLAG(t8)
     GET_DIMM_WIDTH_V1
     beq     a1, 0x1, 1f
@@ -1735,6 +1792,11 @@ gate_leveling_exit_new:
     li      mrs_num, 3
     MRS_SEND(mrs_cmd_a,mrs_cs,mrs_num)
 #endif
+
+ddr4_leveling_end:
+    sb      zero, LVL_MODE_OFFSET(t8)
+    sb      zero, LVL_REQ_OFFSET(t8)
+    WAIT_FOR(20000)
 
     move    ra, t9
     jr      ra
