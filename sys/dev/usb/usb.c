@@ -1854,6 +1854,7 @@ int usb_hub_configure(struct usb_device *dev)
 	int i;
 	struct usb_hub_device *hub;
 	struct usb_hc *hc = dev->hc_private;
+	int retry = 2;
 
 	/* "allocate" Hub device */
 	hub=usb_hub_allocate();
@@ -1998,7 +1999,7 @@ int usb_hub_configure(struct usb_device *dev)
 			usb_clear_port_feature(dev, i + 1, USB_PORT_FEAT_C_RESET);
 		}
 	} /* end for i all ports */
-	} while (hub_port_need_rescan);
+	} while (hub_port_need_rescan && --retry);
 
 	return 0;
 }
