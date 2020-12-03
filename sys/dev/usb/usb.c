@@ -1786,6 +1786,7 @@ void usb_hub_port_connect_change(struct usb_device *dev, int port)
 	/* Reset the port */
 	if (hub_port_reset(dev, port, &portstatus) < 0) {
 		printf("cannot reset port %i!?\n", port + 1);
+		wait_ms(200);
 		hub_port_need_rescan = 1;
 		return;
 	}
