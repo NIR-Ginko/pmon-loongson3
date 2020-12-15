@@ -31,28 +31,15 @@ ATTENTION:
 #define CORE_FREQ   800
 #endif
 
-#define L1_LOOPC    64
 #define L1_REFC     4
 #define L1_DIV      1
 #define L2_DIV      2
-#define CORE_LOOPC  (CORE_FREQ*L1_DIV*L2_DIV*L1_REFC/100)
+#define L1_LOOPC  (CORE_FREQ*L1_DIV*L2_DIV*L1_REFC/100)
 
-#if 1
 /* GPU @ 400Mhz */
 #define GPU_DIV_L2    7
 #define HDA_DIV_L2    (DDR_FREQ*DDR_DIV_L2/24)
-#endif
-#if 0
-/* GPU @ 400Mhz */
-#define GPU_DIV_L2    5
-#endif
-#if 0
-/* CPU @ 1000Mhz */
-#define L1_LOOPC    80
-#define L1_REFC     4
-#define L1_DIV      1
-#define L2_DIV      2
-#endif
+
 /* DC @ 200Mhz */
 /* GMAC @ 125Mhz */
 #define DC_LOOPC    80
