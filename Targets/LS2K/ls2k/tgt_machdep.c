@@ -679,6 +679,10 @@ static void _probe_frequencies()
 
 	clk_invalid = 1;
 #ifdef HAVE_TOD
+#ifdef INTERNAL_RTC
+	init_legacy_rtc();
+#endif
+
 #ifdef HPET_RTC
 /* whd : USE HPET to calculate the frequency, 
  *       reduce the booting delay and improve the frequency accuracy. 
@@ -751,8 +755,6 @@ static void _probe_frequencies()
 		}
 	}
 #elif defined(INTERNAL_RTC)
-	init_legacy_rtc();
-
 	SBD_DISPLAY("FREI", CHKPNT_FREQ);
 
 	/*
