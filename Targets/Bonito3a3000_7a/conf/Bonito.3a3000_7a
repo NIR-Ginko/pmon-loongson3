@@ -46,8 +46,8 @@ option		RESERVED_COREMASK=0xfff0 #for 3a3000_7a
 option		SHUTDOWN_MASK=0x0000
 #option		LS7A_PHYS48_TO_HT40 #support 40 bit DMA device,3a3000-1w do not use it.If change bit offset should change dma rx window otherwise cause error.
 
-option  	LOONGSON_3ASINGLE #for 3a3000_7a
-#option		LOONGSON_3ASERVER #for 3a3000_2w_7a
+#option  	LOONGSON_3ASINGLE #for 3a3000_7a
+option		LOONGSON_3ASERVER #for 3a3000_2w_7a
 #option 		LOONGSON_3A92W
 option		BONITO_33M
 option		BOOT_PARAM
